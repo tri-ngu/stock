@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "C:\Users\billn\documents\claude\stock\backend\main.py", line 12, in <module>
+    from agent.orchestrator import StockAdvisorOrchestrator
+  File "C:\Users\billn\documents\claude\stock\backend\agent\orchestrator.py", line 4, in <module>
+    from groq import Groq
+ModuleNotFoundError: No module named 'groq'
