@@ -22,6 +22,8 @@ async function callAIAgent(message, sessionId) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     let fullResponse = '';
+    let portfolio = null;
+    let agentReasoning = { steps: [] };
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
 
@@ -32,7 +34,7 @@ async function callAIAgent(message, sessionId) {
           while (true) {
             const { done, value } = await reader.read();
             if (done) {
-              resolve({ text: fullResponse, success: true });
+              resolve({ text: fullResponse, portfolio, agentReasoning, success: true });
               break;
             }
             buffer += decoder.decode(value, { stream: true });
@@ -44,6 +46,13 @@ async function callAIAgent(message, sessionId) {
                 const data = JSON.parse(line.slice(6));
                 if (data.type === 'text') {
                   fullResponse += data.content;
+                } else if (data.type === 'portfolio') {
+                  portfolio = data.portfolio;
+                } else if (data.type === 'tool_call') {
+                  agentReasoning.steps.push({
+                    tool: data.tool,
+                    reasoning: data.input
+                  });
                 }
               }
             }
@@ -102,10 +111,13 @@ function AIPrototype() {
 
       const result = await callAIAgent(message, sessionId);
 
-      // Use the local buildPortfolio as the AI response processes
-      const builtPortfolio = buildPortfolio(profile.budget, profile.risk, profile.term);
-      setPortfolio(builtPortfolio);
-      setChartPeriod('Max');
+      // Use AI's portfolio if available, otherwise fallback to local generation
+      const builtPortfolio = result.portfolio || buildPortfolio(profile.budget, profile.risk, profile.term);
+      setPortfolio({
+        ...builtPortfolio,
+        agentReasoning: result.agentReasoning // Include reasoning steps
+      });
+      setChartPeriod('1Y');
       setAIGenerating(false);
       setScreen('dashboard-preauth');
     } catch (error) {
@@ -114,7 +126,7 @@ function AIPrototype() {
       // Fallback to local generation
       const builtPortfolio = buildPortfolio(profile.budget, profile.risk, profile.term);
       setPortfolio(builtPortfolio);
-      setChartPeriod('Max');
+      setChartPeriod('1Y');
       setScreen('dashboard-preauth');
     }
   };
