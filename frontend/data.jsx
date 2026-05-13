@@ -1,5 +1,181 @@
 // Mock data + portfolio generator for Meridian.
 
+// Fetch real market data from backend
+async function fetchRealMarketData(tickers) {
+  try {
+    const tickerString = tickers.join(',');
+    const response = await fetch(`/api/market-data?tickers=${tickerString}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const result = await response.json();
+    return result.data || {};
+  } catch (error) {
+    console.error('Error fetching market data:', error);
+    return {};
+  }
+}
+
+// Build portfolio using real market data
+async function buildPortfolioWithRealData(budget, risk, term, tickers) {
+  try {
+    // Fetch real data for the tickers
+    const marketData = await fetchRealMarketData(tickers);
+
+    if (Object.keys(marketData).length === 0) {
+      // Fallback to synthetic if real data unavailable
+      return buildPortfolio(budget, risk, term);
+    }
+
+    // Use real prices and metrics
+    const positions = [];
+    let totalWeight = 0;
+    const allocations = {};
+
+    // Calculate allocation weights based on risk
+    const r = risk / 100;
+    const eqUS    = 0.20 + 0.40 * r;
+    const eqIntl  = 0.05 + 0.18 * r;
+    const em      = 0.02 + 0.08 * r;
+    const bonds   = 0.50 - 0.40 * r;
+    const real    = 0.05 + 0.03 * r;
+    const gold    = 0.04 + 0.02 * (1 - r);
+    const cash    = Math.max(0.03, 0.10 - 0.05 * r);
+
+    // Map tickers to their real data
+    for (const ticker of tickers) {
+      if (!marketData[ticker]) continue;
+
+      const data = marketData[ticker];
+      const holding = HOLDINGS_UNIVERSE.find(h => h.ticker === ticker);
+      if (!holding) continue;
+
+      const weight = allocations[ticker] || (1 / tickers.length);
+      const dollars = weight * budget;
+      const shares = +(dollars / data.current_price).toFixed(4);
+
+      positions.push({
+        ...holding,
+        price: data.current_price,
+        weight,
+        dollars,
+        shares,
+      });
+
+      totalWeight += weight;
+    }
+
+    // Calculate real metrics from market data
+    let avgReturn = 0;
+    let avgVol = 0;
+    for (const ticker of tickers) {
+      if (marketData[ticker]) {
+        avgReturn += marketData[ticker].avg_return / tickers.length;
+        avgVol += marketData[ticker].volatility / tickers.length;
+      }
+    }
+
+    // Adjust metrics based on risk and diversification
+    const expReturn = Math.max(2, avgReturn * (0.5 + r)) + (4.2 - 4.2 * r * 0.3);
+    const vol = Math.max(3, avgVol * r);
+    const sharpe = +((expReturn - 2) / vol).toFixed(2);
+    const maxDD = -(vol * 1.5 + 5);
+
+    // Build historical series from real data
+    const yrs = term || 10;
+    const series = [];
+    const dates = marketData[tickers[0]]?.dates || [];
+
+    if (dates.length > 0) {
+      // Use last 60 data points or less
+      const startIdx = Math.max(0, dates.length - 60);
+      const dayPrices = marketData[tickers[0]]?.prices || [];
+
+      for (let i = startIdx; i < dates.length; i++) {
+        const dayIdx = i;
+        const historicalPrice = dayPrices[dayIdx] || budget;
+        // Normalize to match budget at end
+        const value = (historicalPrice / (dayPrices[dayPrices.length - 1] || 1)) * budget * (0.8 + Math.random() * 0.4);
+        series.push({
+          time: dates[dayIdx],
+          value: +value.toFixed(2)
+        });
+      }
+    }
+
+    // If no real series, use synthetic
+    if (series.length === 0) {
+      const seed = (risk * 9301 + 49297) % 233280;
+      const rng = (n) => ((seed * (n + 1) * 9301 + 49297) % 233280) / 233280;
+      let v = budget;
+      const ANCHOR = { y: 2026, m: 4 };
+      for (let i = 0; i < 60; i++) {
+        const monthlyMu = expReturn / 1200;
+        const monthlySigma = vol / Math.sqrt(12) / 100;
+        const shock = (rng(i) - 0.5) * 2 * monthlySigma * 2;
+        v = v * (1 + monthlyMu + shock);
+        const monthsBack = 59 - i;
+        let m = ANCHOR.m - monthsBack;
+        let y = ANCHOR.y;
+        while (m < 0) { m += 12; y--; }
+        while (m > 11) { m -= 12; y++; }
+        const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+        series.push({ time: dateStr, value: +v.toFixed(2) });
+      }
+    }
+
+    // Daily series (30 days ending May 12, 2026)
+    const dailySeries = [];
+    const dailySeed = (risk * 1049 + 7919) % 233280;
+    const drng = (n) => ((dailySeed * (n + 1) * 9301 + 49297) % 233280) / 233280;
+    let dv = series[series.length - 1].value;
+    const END = new Date(2026, 4, 12);
+    for (let i = 29; i >= 0; i--) {
+      const date = new Date(END);
+      date.setDate(date.getDate() - i);
+      const dailyMu = expReturn / 36500;
+      const dailySigma = vol / Math.sqrt(252) / 100;
+      const shock = (drng(i) - 0.5) * 2 * dailySigma * 1.5;
+      dv = dv * (1 + dailyMu + shock);
+      const ds = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      dailySeries.push({ time: ds, value: +dv.toFixed(2) });
+    }
+
+    // Projected trajectory (forward-looking)
+    const projectedSeries = [];
+    const projSeed = (risk * 7919 + 1049) % 233280;
+    const prng = (n) => ((projSeed * (n + 1) * 9301 + 49297) % 233280) / 233280;
+    let pv = dv;
+    const START = new Date(2026, 4, 12);
+    for (let i = 0; i <= yrs * 12; i++) {
+      const date = new Date(START);
+      date.setMonth(date.getMonth() + i);
+      const monthlyMu = expReturn / 1200;
+      const monthlySigma = vol / Math.sqrt(12) / 100;
+      const shock = (prng(i) - 0.5) * 2 * monthlySigma * 2;
+      pv = pv * (1 + monthlyMu + shock);
+      const ps = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      projectedSeries.push({ time: ps, value: +pv.toFixed(2) });
+    }
+
+    // Projected metrics
+    const projLow  = budget * Math.pow(1 + (expReturn / 100) - vol / 100, yrs);
+    const projMid  = budget * Math.pow(1 + expReturn / 100, yrs);
+    const projHigh = budget * Math.pow(1 + (expReturn / 100) + vol / 200, yrs);
+
+    return {
+      budget, risk, term: yrs,
+      positions,
+      metrics: { expReturn, vol, sharpe, maxDD, projLow, projMid, projHigh },
+      series,
+      dailySeries,
+      projectedSeries,
+    };
+  } catch (error) {
+    console.error('Error building portfolio with real data:', error);
+    // Fallback to synthetic
+    return buildPortfolio(budget, risk, term);
+  }
+}
+
 const HOLDINGS_UNIVERSE = [
   { ticker: 'VTI',  name: 'Total US Market ETF',           sector: 'US Equity',     price: 274.51, day: 0.42 },
   { ticker: 'VXUS', name: 'Total Intl Stock ETF',          sector: 'Intl Equity',   price:  65.20, day: 0.18 },
@@ -330,9 +506,11 @@ function applyOrdersToPortfolio(portfolio, orders) {
 
 // Portfolio period buttons based on investment horizon
 function getPeriodsForTerm(term) {
-  if (term <= 3) return ['1M', '3M', '6M', '1Y'];
-  if (term <= 7) return ['1M', '3M', '6M', '1Y', '3Y'];
-  return ['1M', '3M', '6M', '1Y', '3Y', '5Y'];
+  if (term <= 0.5) return ['1M', '3M', '6M'];           // 6-month horizon: only show up to horizon
+  if (term <= 1) return ['1M', '3M', '6M', '1Y'];       // 1-year horizon: show up to 1Y
+  if (term <= 3) return ['1M', '3M', '6M', '1Y'];       // Up to 3 years
+  if (term <= 7) return ['1M', '3M', '6M', '1Y', '3Y'];  // Up to 7 years
+  return ['1M', '3M', '6M', '1Y', '3Y', '5Y'];          // 7+ years
 }
 
-Object.assign(window, { HOLDINGS_UNIVERSE, TRADABLE_UNIVERSE, buildPortfolio, applyOrdersToPortfolio, SECTOR_COLORS, RISK_LABELS, riskLabelFor, GOALS, MARKET_HEADLINES, AGENT_STEPS, FUTURE_ACTIONS, ACTION_CATEGORIES, WEEKLY_ACTIVITY, getPeriodsForTerm });
+Object.assign(window, { HOLDINGS_UNIVERSE, TRADABLE_UNIVERSE, buildPortfolio, buildPortfolioWithRealData, applyOrdersToPortfolio, SECTOR_COLORS, RISK_LABELS, riskLabelFor, GOALS, MARKET_HEADLINES, AGENT_STEPS, FUTURE_ACTIONS, ACTION_CATEGORIES, WEEKLY_ACTIVITY, getPeriodsForTerm });

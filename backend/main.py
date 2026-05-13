@@ -1,15 +1,20 @@
 import os
 import json
 import logging
+import numpy as np
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from agent.orchestrator import StockAdvisorOrchestrator
+try:
+    from agent.orchestrator import StockAdvisorOrchestrator
+except ImportError as e:
+    logger.warning(f"Could not import StockAdvisorOrchestrator: {e}")
+    StockAdvisorOrchestrator = None
 
 # Load environment variables
 load_dotenv()
@@ -24,6 +29,11 @@ logger = logging.getLogger(__name__)
 # Initialize FastAPI app
 app = FastAPI(title="Stock Advisor AI")
 
+# Simple test route to verify the app is working
+@app.get("/simple-test")
+async def simple_test():
+    return {"message": "Simple test works!"}
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -33,12 +43,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files (CSS, JS)
-frontend_dir = Path(__file__).parent.parent / "frontend"
-logger.info(f"Frontend directory: {frontend_dir}")
-logger.info(f"Frontend directory exists: {frontend_dir.exists()}")
-if frontend_dir.exists():
-    app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")
+# Mount static files (CSS, JS) - but only if the frontend directory exists
+# This handles both local development and Vercel deployment
+try:
+    frontend_dir = Path(__file__).parent.parent / "frontend"
+    if frontend_dir.exists():
+        logger.info(f"Mounting frontend directory: {frontend_dir}")
+        app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")
+    else:
+        logger.info("Frontend directory not found, skipping static file mounting")
+except Exception as e:
+    logger.warning(f"Failed to mount static files: {e}")
 
 # Session storage (in-memory for MVP, upgrade to database in Phase 2)
 sessions = {}
@@ -56,6 +71,7 @@ def _remove_portfolio_json(text: str) -> str:
     text = re.sub(r'\{[\s\n]*"[^}]*"\s*:\s*[^}]*\}', '', text, flags=re.DOTALL)
     return text.strip()
 
+@app.post("/chat")
 @app.post("/api/chat")
 async def chat(request: MessageRequest):
     """Chat endpoint with streaming responses."""
@@ -63,6 +79,9 @@ async def chat(request: MessageRequest):
         session_id = request.session_id or "default"
 
         # Get or create session
+        if StockAdvisorOrchestrator is None:
+            raise HTTPException(status_code=500, detail="StockAdvisorOrchestrator not available")
+
         if session_id not in sessions:
             sessions[session_id] = StockAdvisorOrchestrator()
 
@@ -76,16 +95,35 @@ async def chat(request: MessageRequest):
                     if text:
                         yield f"data: {json.dumps({'type': 'text', 'content': text})}\n\n"
                 elif chunk["type"] == "tool_call":
-                    if chunk["tool"] == "build_portfolio_recommendation":
-                        result = chunk["result"]
+                    tool_name = chunk["tool"]
+                    result = chunk["result"]
+                    tool_input = chunk.get("input", {})
+
+                    # Emit tool_call event for reasoning visibility
+                    yield f"data: {json.dumps({'type': 'tool_call', 'tool': tool_name, 'input': tool_input})}\n\n"
+
+                    if tool_name == "build_portfolio_recommendation":
                         if "positions" in result:
-                            yield f"data: {json.dumps({'type': 'portfolio', 'data': result})}\n\n"
+                            # Format portfolio data for frontend
+                            portfolio_data = {
+                                'budget': result.get('budget', 0),
+                                'risk_level': result.get('risk_level', 'moderate'),
+                                'positions': result.get('positions', {}),
+                                'stocks': result.get('stocks', []),
+                                'expected_return': result.get('expected_return', 0),
+                                'volatility': result.get('volatility', 0),
+                                'sharpe_ratio': result.get('sharpe_ratio', 0),
+                                'goals': result.get('goals', []),
+                                'reasoning': result.get('reasoning', '')
+                            }
+                            yield f"data: {json.dumps({'type': 'portfolio', 'portfolio': portfolio_data})}\n\n"
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
     except Exception as e:
         logger.error(f"Error in chat endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/portfolio")
 @app.post("/api/portfolio")
 async def get_portfolio(request: MessageRequest):
     """Get portfolio recommendation."""
@@ -96,10 +134,77 @@ async def get_portfolio(request: MessageRequest):
         logger.error(f"Error in portfolio endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/health")
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+@app.get("/test")
+@app.get("/api/test")
+async def test_endpoint(request: Request):
+    """Test endpoint to debug routing."""
+    return {
+        "message": "test endpoint working",
+        "url": str(request.url),
+        "path": request.url.path
+    }
+
+@app.get("/market-data")
+@app.get("/api/market-data")
+async def get_market_data(tickers: str = "VTI,VXUS,BND,AAPL,MSFT,NVDA"):
+    """Fetch real historical market data for given tickers."""
+    try:
+        import yfinance as yf
+        import pandas as pd
+        from datetime import datetime, timedelta
+
+        ticker_list = [t.strip() for t in tickers.split(',')]
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=5*365)
+
+        data_dict = {}
+
+        for ticker in ticker_list:
+            try:
+                stock = yf.Ticker(ticker)
+                hist = stock.history(start=start_date, end=end_date)
+
+                if len(hist) == 0:
+                    continue
+
+                # Extract closing prices
+                closes = hist['Close'].values.tolist()
+                dates = [d.strftime('%Y-%m-%d') for d in hist.index]
+
+                # Calculate returns
+                returns = hist['Close'].pct_change().dropna()
+
+                # Calculate metrics (annualized)
+                avg_return = returns.mean() * 252 * 100  # annualized %
+                volatility = returns.std() * np.sqrt(252) * 100  # annualized %
+                current_price = hist['Close'].iloc[-1]
+
+                data_dict[ticker] = {
+                    'prices': [float(p) for p in closes],
+                    'dates': dates,
+                    'current_price': float(current_price),
+                    'avg_return': float(avg_return),
+                    'volatility': float(volatility),
+                    'data_points': len(hist)
+                }
+            except Exception as e:
+                logger.error(f"Error fetching data for {ticker}: {e}")
+                continue
+
+        return {
+            "status": "success",
+            "data": data_dict,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error in market-data endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/style.css")
 async def serve_css():
@@ -128,6 +233,10 @@ async def serve_js():
 @app.get("/{filename}")
 async def serve_jsx(filename: str):
     """Serve JSX and other frontend files."""
+    # Skip empty filenames - they're handled by the root route
+    if not filename:
+        raise HTTPException(status_code=404, detail="Not Found")
+
     try:
         frontend_dir = Path(__file__).parent.parent / "frontend"
         file_path = frontend_dir / filename

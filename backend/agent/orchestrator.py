@@ -15,115 +15,172 @@ from .tools import (
 
 logger = logging.getLogger(__name__)
 
-# Tool definitions for Claude
+# Tool definitions for Groq API (OpenAI format)
 TOOLS = [
     {
-        "name": "get_stock_info",
-        "description": "Get current stock information including price, P/E ratio, market cap, and 52-week highs/lows",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "ticker": {
-                    "type": "string",
-                    "description": "Stock ticker symbol (e.g., 'AAPL')"
-                }
-            },
-            "required": ["ticker"]
-        }
-    },
-    {
-        "name": "screen_stocks",
-        "description": "Screen stocks based on criteria like market cap and P/E ratio",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "criteria": {
-                    "type": "object",
-                    "description": "Screening criteria (min_market_cap, pe_range, etc.)"
-                }
-            },
-            "required": ["criteria"]
-        }
-    },
-    {
-        "name": "get_historical_data",
-        "description": "Fetch historical price data and calculate returns and volatility",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "ticker": {
-                    "type": "string",
-                    "description": "Stock ticker symbol"
+        "type": "function",
+        "function": {
+            "name": "get_stock_info",
+            "description": "Get current stock information including price, P/E ratio, market cap, and 52-week highs/lows",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "Stock ticker symbol (e.g., 'AAPL')"
+                    }
                 },
-                "period": {
-                    "type": "string",
-                    "description": "Time period (e.g., '5y', '1y', '6mo')",
-                    "default": "5y"
-                }
-            },
-            "required": ["ticker"]
+                "required": ["ticker"]
+            }
         }
     },
     {
-        "name": "optimize_portfolio",
-        "description": "Optimize portfolio allocation using Mean-Variance optimization to maximize Sharpe ratio",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "tickers": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of stock tickers to include in portfolio"
-                }
-            },
-            "required": ["tickers"]
-        }
-    },
-    {
-        "name": "build_portfolio_recommendation",
-        "description": "Build a diversified portfolio recommendation based on budget and risk level",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "budget": {
-                    "type": "number",
-                    "description": "Investment budget in dollars"
+        "type": "function",
+        "function": {
+            "name": "screen_stocks",
+            "description": "Screen stocks based on sector, market cap, dividend yield, and user investment goals. Returns stocks aligned with AI's reasoning about the user's needs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "criteria": {
+                        "type": "object",
+                        "description": "Screening criteria",
+                        "properties": {
+                            "sector": {
+                                "type": "string",
+                                "enum": ["tech", "healthcare", "finance", "energy", "consumer", "diversified"],
+                                "description": "Sector to focus on based on user profile"
+                            },
+                            "market_cap": {
+                                "type": "string",
+                                "enum": ["large", "mid", "small"],
+                                "description": "Preferred market cap range"
+                            },
+                            "dividend_yield": {
+                                "type": "string",
+                                "enum": ["high", "moderate", "growth"],
+                                "description": "Income vs growth preference"
+                            },
+                            "user_goals": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "User goals like 'retire', 'wealth', 'income', 'house', 'edu'"
+                            }
+                        }
+                    }
                 },
-                "risk_level": {
-                    "type": "string",
-                    "enum": ["conservative", "moderate", "aggressive"],
-                    "description": "Risk tolerance level"
-                }
-            },
-            "required": ["budget", "risk_level"]
+                "required": ["criteria"]
+            }
         }
     },
     {
-        "name": "analyze_company",
-        "description": "Analyze a company's financial metrics and fundamentals",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "ticker": {
-                    "type": "string",
-                    "description": "Stock ticker symbol"
-                }
-            },
-            "required": ["ticker"]
+        "type": "function",
+        "function": {
+            "name": "get_historical_data",
+            "description": "Fetch historical price data and calculate returns and volatility",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "Stock ticker symbol"
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": "Time period (e.g., '5y', '1y', '6mo')",
+                        "default": "5y"
+                    }
+                },
+                "required": ["ticker"]
+            }
         }
     },
     {
-        "name": "get_sector_comparison",
-        "description": "Compare stocks within a specific sector",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "sector": {
-                    "type": "string",
-                    "description": "Sector name (e.g., 'Technology', 'Finance', 'Healthcare')"
-                }
-            },
-            "required": ["sector"]
+        "type": "function",
+        "function": {
+            "name": "optimize_portfolio",
+            "description": "Optimize portfolio allocation using Mean-Variance optimization to maximize Sharpe ratio",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tickers": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of stock tickers to include in portfolio"
+                    }
+                },
+                "required": ["tickers"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "build_portfolio_recommendation",
+            "description": "Build a portfolio recommendation using AI-selected stocks, optimized for user budget, risk level, goals, and time horizon. Should be called AFTER screen_stocks to use AI-selected securities.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "budget": {
+                        "type": "number",
+                        "description": "Investment budget in dollars"
+                    },
+                    "risk_level": {
+                        "type": "string",
+                        "enum": ["conservative", "moderate", "aggressive"],
+                        "description": "Risk tolerance level"
+                    },
+                    "stocks": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of tickers from screen_stocks to build portfolio with. If omitted, defaults to diversified ETFs."
+                    },
+                    "user_goals": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "User's investment goals to tailor allocation"
+                    },
+                    "time_horizon": {
+                        "type": "integer",
+                        "description": "Years until money is needed (default 10)"
+                    }
+                },
+                "required": ["budget", "risk_level"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_company",
+            "description": "Analyze a company's financial metrics and fundamentals",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "Stock ticker symbol"
+                    }
+                },
+                "required": ["ticker"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_sector_comparison",
+            "description": "Compare stocks within a specific sector",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sector": {
+                        "type": "string",
+                        "description": "Sector name (e.g., 'Technology', 'Finance', 'Healthcare')"
+                    }
+                },
+                "required": ["sector"]
+            }
         }
     }
 ]
@@ -136,9 +193,19 @@ class StockAdvisorOrchestrator:
 
 1. Help users understand stock investing concepts
 2. Analyze stocks and companies thoroughly
-3. Screen stocks based on fundamental criteria
-4. Build diversified, low-risk portfolios matched to their risk tolerance and budget
+3. Screen stocks based on user goals, risk profile, and market conditions
+4. Build diversified, optimized portfolios matched to their risk tolerance and budget
 5. Explain your recommendations in simple, beginner-friendly language
+
+KEY WORKFLOW FOR PORTFOLIO GENERATION:
+1. First use screen_stocks with criteria aligned to user's GOALS and RISK LEVEL
+   - If user wants retirement/income → prefer sectors with dividends
+   - If user wants wealth building → tech/growth sectors
+   - Pass user_goals to inform stock selection
+2. Then use build_portfolio_recommendation with the screened stocks
+   - Pass the stocks returned from screen_stocks
+   - Include user_goals and time_horizon
+   - This optimizes ONLY over AI-selected stocks, not generic defaults
 
 Guidelines:
 - Always prioritize safety and diversification
@@ -147,7 +214,8 @@ Guidelines:
 - Avoid penny stocks and highly speculative investments
 - Be conservative with initial recommendations
 - Always disclose risks and limitations
-- Never guarantee returns or provide specific financial advice without disclaimers"""
+- Never guarantee returns or provide specific financial advice without disclaimers
+- IMPORTANT: Use screen_stocks BEFORE build_portfolio_recommendation to ensure AI-driven selection"""
 
     def process_message(self, user_message: str) -> Generator[Dict[str, Any], None, None]:
         """Process a user message and yield response chunks."""
@@ -159,12 +227,12 @@ Guidelines:
         messages = self.conversation_history.copy()
 
         while True:
+            api_messages = [{"role": "system", "content": self.system_prompt}] + messages
             response = self.client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 max_tokens=1024,
-                system=self.system_prompt,
                 tools=TOOLS,
-                messages=messages
+                messages=api_messages
             )
 
             # Process response content
@@ -223,6 +291,7 @@ Guidelines:
                 yield {
                     "type": "tool_call",
                     "tool": tool_name,
+                    "input": tool_input,
                     "result": result
                 }
 
@@ -253,7 +322,8 @@ Guidelines:
             if tool_name == "get_stock_info":
                 return get_stock_info(tool_input["ticker"])
             elif tool_name == "screen_stocks":
-                return {"screened_tickers": screen_stocks(tool_input.get("criteria", {}))}
+                result = screen_stocks(tool_input.get("criteria", {}))
+                return result
             elif tool_name == "get_historical_data":
                 return get_historical_data(
                     tool_input["ticker"],
@@ -262,9 +332,13 @@ Guidelines:
             elif tool_name == "optimize_portfolio":
                 return optimize_portfolio(tool_input["tickers"])
             elif tool_name == "build_portfolio_recommendation":
+                # Support both old signature (for backward compat) and new signature
                 return build_portfolio_recommendation(
-                    tool_input["budget"],
-                    tool_input["risk_level"]
+                    budget=tool_input["budget"],
+                    risk_level=tool_input["risk_level"],
+                    stocks=tool_input.get("stocks", None),
+                    user_goals=tool_input.get("user_goals", None),
+                    time_horizon=tool_input.get("time_horizon", 10)
                 )
             elif tool_name == "analyze_company":
                 return analyze_company(tool_input["ticker"])

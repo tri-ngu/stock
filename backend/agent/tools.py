@@ -38,31 +38,70 @@ def get_stock_info(ticker: str) -> Dict[str, Any]:
         logger.error(f"Error fetching stock info for {ticker}: {e}")
         return {"error": str(e), "ticker": ticker}
 
-def screen_stocks(criteria: Dict[str, Any]) -> List[str]:
-    """Screen stocks based on given criteria."""
-    tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "NFLX", "CRM", "ADBE"]
+def screen_stocks(criteria: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Screen stocks based on AI-provided criteria.
+
+    criteria: {
+      'sector': 'tech' | 'healthcare' | 'finance' | 'energy' | 'consumer' | 'diversified',
+      'market_cap': 'large' | 'mid' | 'small',
+      'dividend_yield': 'high' | 'moderate' | 'growth',
+      'user_goals': ['retire', 'wealth', 'income', 'house', 'edu'] (list)
+    }
+    """
+
+    # Dynamic universe by sector - AI chooses sector based on user goals
+    stock_universe = {
+        'tech': ['AAPL', 'MSFT', 'NVDA', 'META', 'CRM', 'ADBE', 'NFLX', 'TSLA'],
+        'healthcare': ['JNJ', 'UNH', 'PFE', 'ABBV', 'TMO', 'MRK', 'LLY', 'BMY'],
+        'finance': ['JPM', 'BAC', 'GS', 'MS', 'BLK', 'SCHW', 'CB', 'ICE'],
+        'energy': ['XOM', 'CVX', 'COP', 'SLB', 'MPC', 'HES', 'EOG', 'PSX'],
+        'consumer': ['PG', 'KO', 'WMT', 'HD', 'MCD', 'COST', 'NKE', 'SBUX'],
+        'diversified': ['VTI', 'VOO', 'VTSAX', 'SPY', 'IVV', 'SCHB', 'FSKAX', 'SWTSX']
+    }
+
+    sector = criteria.get('sector', 'diversified').lower()
+    market_cap_pref = criteria.get('market_cap', 'large').lower()
+    dividend_pref = criteria.get('dividend_yield', 'moderate').lower()
+    user_goals = criteria.get('user_goals', [])
+
+    # Get candidates from selected sector
+    candidates = stock_universe.get(sector, stock_universe['diversified'])
 
     screened = []
-    min_market_cap = criteria.get("min_market_cap", 5e9)
-    pe_range = criteria.get("pe_range", (10, 30))
 
-    for ticker in tickers:
+    for ticker in candidates:
         try:
             info = get_stock_info(ticker)
             if "error" in info:
                 continue
 
-            market_cap = info.get("market_cap", 0)
-            pe_ratio = info.get("pe_ratio", None)
+            # If user goal is 'income' or 'retire', prefer high dividend
+            if 'income' in user_goals or 'retire' in user_goals:
+                div_yield = info.get('dividendYield', 0) or 0
+                if dividend_pref == 'high' and div_yield < 0.02:
+                    continue
+                if dividend_pref == 'moderate' and div_yield < 0.01:
+                    continue
 
-            if market_cap >= min_market_cap:
-                if pe_ratio is None or (pe_range[0] <= pe_ratio <= pe_range[1]):
-                    screened.append(ticker)
+            # If user goal is 'wealth' or 'house', prefer growth
+            if 'wealth' in user_goals and dividend_pref == 'growth':
+                pass  # No dividend filter
+
+            screened.append(ticker)
+
         except Exception as e:
             logger.error(f"Error screening {ticker}: {e}")
             continue
 
-    return screened[:5]
+    reasoning = f"Selected {sector.title()} sector stocks aligned with goals: {', '.join(user_goals) if user_goals else 'balanced'}"
+
+    return {
+        'stocks': screened[:6],
+        'sector': sector,
+        'reasoning': reasoning,
+        'count': len(screened[:6])
+    }
 
 def get_historical_data(ticker: str, period: str = "5y") -> Dict[str, Any]:
     """Fetch historical price data for a ticker."""
@@ -160,10 +199,29 @@ def optimize_portfolio(tickers: List[str], weights: List[float] = None) -> Dict[
         weights = {ticker: 1/len(tickers) for ticker in tickers}
         return {"tickers": tickers, "weights": weights, "error": str(e)}
 
-def build_portfolio_recommendation(budget: float, risk_level: str) -> Dict[str, Any]:
-    """Build a diversified portfolio recommendation."""
+def build_portfolio_recommendation(
+    budget: float,
+    risk_level: str,
+    stocks: List[str] = None,
+    user_goals: List[str] = None,
+    time_horizon: int = 10
+) -> Dict[str, Any]:
+    """
+    Build a portfolio recommendation using AI-selected stocks.
+
+    Args:
+        budget: Investment amount
+        risk_level: 'conservative', 'moderate', 'aggressive'
+        stocks: AI-selected tickers from stock_screener
+        user_goals: User's investment goals ['retire', 'wealth', 'income', 'house', 'edu']
+        time_horizon: Years to invest
+    """
     try:
         budget = float(budget)
+
+        # If no stocks provided by AI, use default diversified basket
+        if not stocks or len(stocks) == 0:
+            stocks = ['VTI', 'VOO', 'VTSAX']
 
         # Asset allocation by risk level
         allocations = {
@@ -186,18 +244,25 @@ def build_portfolio_recommendation(budget: float, risk_level: str) -> Dict[str, 
 
         allocation = allocations.get(risk_level.lower(), allocations["moderate"])
 
-        # Select representative tickers
-        bonds_etf = ["TLT", "BND"]
-        dividend_stocks = ["JNJ", "KO", "PG", "VZ"]
-        growth_stocks = ["MSFT", "GOOGL", "NVDA", "AAPL"]
+        # Incorporate user goals into allocation
+        # If income goal, increase dividend weight
+        if user_goals and 'income' in user_goals:
+            allocation['dividend_stocks'] += 0.15
+            allocation['growth_stocks'] -= 0.15
 
-        portfolio_tickers = (
-            bonds_etf[:1] +
-            dividend_stocks[:2] +
-            growth_stocks[:2]
-        )
+        # If retirement, emphasize bonds for longer horizons
+        if user_goals and 'retire' in user_goals and time_horizon > 20:
+            allocation['bonds'] += 0.10
+            allocation['growth_stocks'] -= 0.10
 
-        # Optimize portfolio
+        # Normalize to sum to 1
+        total = sum(allocation.values())
+        allocation = {k: v / total for k, v in allocation.items()}
+
+        # Use AI-selected stocks for optimization
+        portfolio_tickers = stocks[:5] if len(stocks) >= 5 else stocks
+
+        # Optimize portfolio on AI-selected stocks
         optimized = optimize_portfolio(portfolio_tickers)
 
         if "error" in optimized and len(portfolio_tickers) > 1:
@@ -208,13 +273,18 @@ def build_portfolio_recommendation(budget: float, risk_level: str) -> Dict[str, 
         # Calculate dollar amounts
         positions = {ticker: budget * weights[ticker] for ticker in portfolio_tickers}
 
+        reasoning = f"Built portfolio from {len(portfolio_tickers)} AI-selected stocks for {risk_level} risk, goals: {', '.join(user_goals or ['balanced'])}"
+
         return {
             "budget": budget,
             "risk_level": risk_level,
             "positions": positions,
+            "stocks": portfolio_tickers,
             "expected_return": optimized.get("expected_return", 0),
             "volatility": optimized.get("volatility", 0),
             "sharpe_ratio": optimized.get("sharpe_ratio", 0),
+            "reasoning": reasoning,
+            "goals": user_goals or []
         }
     except Exception as e:
         logger.error(f"Error building portfolio recommendation: {e}")

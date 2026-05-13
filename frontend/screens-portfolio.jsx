@@ -316,6 +316,23 @@ function Dashboard({ copy, profile, portfolio, density, mode = 'initial', pendin
             </div>
           </section>
 
+          {/* AI Agent Reasoning */}
+          {portfolio.agentReasoning?.steps && portfolio.agentReasoning.steps.length > 0 && (
+            <section style={{ marginTop: 28 }}>
+              <Eyebrow>AI Agent Reasoning</Eyebrow>
+              <div style={{ marginTop: 12, fontFamily: 'JetBrains Mono', fontSize: 11, lineHeight: 1.6 }}>
+                {portfolio.agentReasoning.steps.map((step, i) => (
+                  <div key={i} style={{ marginBottom: 8, padding: '8px', background: 'var(--surface)', border: '1px solid var(--rule)' }}>
+                    <strong style={{ color: 'var(--ink)' }}>→ {step.tool}</strong>
+                    <div style={{ color: 'var(--ink-mute)', marginTop: 4, fontSize: 10 }}>
+                      {typeof step.reasoning === 'object' ? JSON.stringify(step.reasoning, null, 2) : String(step.reasoning)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Holdings table */}
           <section>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
