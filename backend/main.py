@@ -10,21 +10,32 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-try:
-    from agent.orchestrator import StockAdvisorOrchestrator
-except ImportError as e:
-    logger.warning(f"Could not import StockAdvisorOrchestrator: {e}")
-    StockAdvisorOrchestrator = None
-
-# Load environment variables
-load_dotenv()
-
-# Configure logging
+# Configure logging FIRST (before any logger usage)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Load environment variables
+load_dotenv()
+
+# Import orchestrator with proper error handling
+ORCHESTRATOR_ERROR = None
+try:
+    # Try different import paths for flexibility (local vs Vercel)
+    try:
+        from agent.orchestrator import StockAdvisorOrchestrator
+    except ModuleNotFoundError:
+        from backend.agent.orchestrator import StockAdvisorOrchestrator
+
+    ORCHESTRATOR_AVAILABLE = True
+except Exception as e:
+    logger.error(f"Failed to import StockAdvisorOrchestrator: {e}")
+    import traceback
+    ORCHESTRATOR_ERROR = traceback.format_exc()
+    ORCHESTRATOR_AVAILABLE = False
+    StockAdvisorOrchestrator = None
 
 # Initialize FastAPI app
 app = FastAPI(title="Stock Advisor AI")
@@ -33,6 +44,15 @@ app = FastAPI(title="Stock Advisor AI")
 @app.get("/simple-test")
 async def simple_test():
     return {"message": "Simple test works!"}
+
+@app.get("/debug/status")
+async def debug_status():
+    """Debug endpoint to check app status."""
+    return {
+        "orchestrator_available": ORCHESTRATOR_AVAILABLE,
+        "orchestrator_error": ORCHESTRATOR_ERROR,
+        "groq_api_key_set": bool(os.getenv("GROQ_API_KEY"))
+    }
 
 # Add CORS middleware
 app.add_middleware(
@@ -78,10 +98,11 @@ async def chat(request: MessageRequest):
     try:
         session_id = request.session_id or "default"
 
-        # Get or create session
-        if StockAdvisorOrchestrator is None:
-            raise HTTPException(status_code=500, detail="StockAdvisorOrchestrator not available")
+        # Check if orchestrator is available
+        if not ORCHESTRATOR_AVAILABLE:
+            raise HTTPException(status_code=500, detail="AI orchestrator not available. Check dependencies and environment variables.")
 
+        # Get or create session
         if session_id not in sessions:
             sessions[session_id] = StockAdvisorOrchestrator()
 
@@ -138,7 +159,10 @@ async def get_portfolio(request: MessageRequest):
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "orchestrator_available": ORCHESTRATOR_AVAILABLE
+    }
 
 @app.get("/test")
 @app.get("/api/test")
