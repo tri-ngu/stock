@@ -2,72 +2,39 @@
 
 const { useState: useS, useEffect: useE, useMemo: useM, useRef: useRef } = React;
 
+// AI agent chat handler — calls backend SSE endpoint and collects portfolio + reasoning
+async function callAIAgent(message, sessionId) {
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, session_id: sessionId }),
+  });
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let portfolio = null;
+  let agentReasoning = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const lines = decoder.decode(value).split('\n');
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      try {
+        const event = JSON.parse(line.slice(6));
+        if (event.type === 'text') agentReasoning.push(event.content);
+        if (event.type === 'portfolio') portfolio = event.portfolio;
+      } catch {}
+    }
+  }
+  return { portfolio, agentReasoning: agentReasoning.join('') };
+}
+
 // Default palette for the live app (not the design system)
 const DEFAULT_PALETTE = 'ivory';
 const DEFAULT_PERSONALITY = 'formal';
 const DEFAULT_RISK_STYLE = 'slider';
-
-// ── AI Agent Loop ─────────────────────────────────────────────────────
-async function callAIAgent(message, sessionId) {
-  try {
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: message,
-        session_id: sessionId
-      })
-    });
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-    let fullResponse = '';
-    let portfolio = null;
-    let agentReasoning = { steps: [] };
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-
-    return new Promise((resolve, reject) => {
-      const processStream = async () => {
-        try {
-          let buffer = '';
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              resolve({ text: fullResponse, portfolio, agentReasoning, success: true });
-              break;
-            }
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const data = JSON.parse(line.slice(6));
-                if (data.type === 'text') {
-                  fullResponse += data.content;
-                } else if (data.type === 'portfolio') {
-                  portfolio = data.portfolio;
-                } else if (data.type === 'tool_call') {
-                  agentReasoning.steps.push({
-                    tool: data.tool,
-                    reasoning: data.input
-                  });
-                }
-              }
-            }
-          }
-        } catch (err) {
-          reject(err);
-        }
-      };
-      processStream();
-    });
-  } catch (error) {
-    console.error('AI Agent error:', error);
-    throw error;
-  }
-}
 
 // ── Main App Component ────────────────────────────────────────────────
 function AIPrototype() {
@@ -95,7 +62,7 @@ function AIPrototype() {
   });
   const [scheduleModal, setScheduleModal] = useS({ open: false });
 
-  // AI-powered portfolio generation
+  // AI-powered portfolio generation with real market data
   const goGenerateAI = async () => {
     setAIGenerating(true);
     setScreen('generating');
@@ -111,8 +78,27 @@ function AIPrototype() {
 
       const result = await callAIAgent(message, sessionId);
 
-      // Use AI's portfolio if available, otherwise fallback to local generation
-      const builtPortfolio = result.portfolio || buildPortfolio(profile.budget, profile.risk, profile.term);
+      // Use AI's portfolio if available, enhance with real data
+      let builtPortfolio;
+      if (result.portfolio && result.portfolio.stocks && result.portfolio.stocks.length > 0) {
+        // Get real market data for the AI-selected stocks
+        builtPortfolio = await window.buildPortfolioWithRealData(
+          profile.budget,
+          profile.risk,
+          profile.term,
+          result.portfolio.stocks
+        );
+      } else {
+        // Fallback: use real data with default tickers
+        const defaultTickers = ['VTI', 'VXUS', 'BND', 'AAPL', 'MSFT'];
+        builtPortfolio = await window.buildPortfolioWithRealData(
+          profile.budget,
+          profile.risk,
+          profile.term,
+          defaultTickers
+        );
+      }
+
       setPortfolio({
         ...builtPortfolio,
         agentReasoning: result.agentReasoning // Include reasoning steps
@@ -123,13 +109,27 @@ function AIPrototype() {
     } catch (error) {
       console.error('AI generation failed:', error);
       setAIGenerating(false);
-      // Fallback to local generation
-      const builtPortfolio = buildPortfolio(profile.budget, profile.risk, profile.term);
-      setPortfolio(builtPortfolio);
+      // Fallback: use real data with default tickers
+      try {
+        const defaultTickers = ['VTI', 'VXUS', 'BND', 'AAPL', 'MSFT'];
+        const builtPortfolio = await window.buildPortfolioWithRealData(
+          profile.budget,
+          profile.risk,
+          profile.term,
+          defaultTickers
+        );
+        setPortfolio(builtPortfolio);
+      } catch (realDataError) {
+        console.error('Real data fallback failed:', realDataError);
+        // Last resort: synthetic data
+        const builtPortfolio = buildPortfolio(profile.budget, profile.risk, profile.term);
+        setPortfolio(builtPortfolio);
+      }
       setChartPeriod('1Y');
       setScreen('dashboard-preauth');
     }
   };
+
 
   const addOrder = (order) => {
     setPendingOrders((prev) => {
@@ -308,6 +308,7 @@ function AIPrototype() {
           onContinue={goGenerateAI}
         />
       )}
+
     </div>
   );
 }
