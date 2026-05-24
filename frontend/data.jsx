@@ -85,18 +85,23 @@ async function buildPortfolioWithRealData(budget, risk, term, tickers) {
     const dates = marketData[tickers[0]]?.dates || [];
 
     if (dates.length > 0) {
-      // Use last 60 data points or less
-      const startIdx = Math.max(0, dates.length - 60);
       const dayPrices = marketData[tickers[0]]?.prices || [];
 
-      for (let i = startIdx; i < dates.length; i++) {
-        const dayIdx = i;
-        const historicalPrice = dayPrices[dayIdx] || budget;
-        // Normalize to match budget at end
-        const value = (historicalPrice / (dayPrices[dayPrices.length - 1] || 1)) * budget * (0.8 + Math.random() * 0.4);
+      // Aggregate daily prices to monthly (last close of each month), up to 36 months back
+      const monthMap = {};
+      for (let i = 0; i < dates.length; i++) {
+        const monthKey = dates[i].substring(0, 7); // "YYYY-MM"
+        monthMap[monthKey] = dayPrices[i];
+      }
+      const sortedMonths = Object.keys(monthMap).sort();
+      const recentMonths = sortedMonths.slice(-36);
+      const endPrice = monthMap[recentMonths[recentMonths.length - 1]] || 1;
+
+      for (const monthKey of recentMonths) {
+        const historicalPrice = monthMap[monthKey] || endPrice;
         series.push({
-          time: dates[dayIdx],
-          value: +value.toFixed(2)
+          time: monthKey + '-01',
+          value: +((historicalPrice / endPrice) * budget).toFixed(2)
         });
       }
     }
@@ -230,18 +235,20 @@ function buildPortfolio(budget, risk, term) {
     positions.push({ ...h, weight, dollars, shares });
   };
 
-  // US Equity: VTI core + leaders proportional to risk
-  push('VTI', targets['US Equity'] * (r > 0.6 ? 0.55 : r > 0.3 ? 0.75 : 0.95));
-  if (r > 0.3) {
-    push('AAPL', targets['US Equity'] * (r > 0.6 ? 0.12 : 0.10));
-    push('MSFT', targets['US Equity'] * (r > 0.6 ? 0.12 : 0.08));
-  }
-  if (r > 0.6) {
-    push('NVDA', targets['US Equity'] * 0.10);
-    push('GOOGL', targets['US Equity'] * 0.08);
-  }
-  if (r < 0.3) {
+  // US Equity: VTI core + randomly selected individual leaders so no two
+  // portfolios always contain the same names.
+  const vtiFrac = r > 0.6 ? 0.50 : r > 0.3 ? 0.72 : 0.95;
+  push('VTI', targets['US Equity'] * vtiFrac);
+  if (r <= 0.3) {
     push('BRK.B', targets['US Equity'] * 0.05);
+  } else {
+    const leaderPool = r > 0.6
+      ? ['NVDA', 'GOOGL', 'MSFT', 'AAPL', 'JNJ']
+      : ['MSFT', 'AAPL', 'GOOGL', 'BRK.B', 'JNJ'];
+    const nPicks = r > 0.6 ? 3 : 2;
+    const shuffled = leaderPool.slice().sort(() => Math.random() - 0.5);
+    const perStock = (targets['US Equity'] * (1 - vtiFrac)) / nPicks;
+    shuffled.slice(0, nPicks).forEach(t => push(t, perStock));
   }
 
   push('VXUS', targets['Intl Equity']);
@@ -504,13 +511,126 @@ function applyOrdersToPortfolio(portfolio, orders) {
   return { ...portfolio, positions, budget: totalDollars };
 }
 
-// Portfolio period buttons based on investment horizon
-function getPeriodsForTerm(term) {
-  if (term <= 0.5) return ['1M', '3M', '6M'];           // 6-month horizon: only show up to horizon
-  if (term <= 1) return ['1M', '3M', '6M', '1Y'];       // 1-year horizon: show up to 1Y
-  if (term <= 3) return ['1M', '3M', '6M', '1Y'];       // Up to 3 years
-  if (term <= 7) return ['1M', '3M', '6M', '1Y', '3Y'];  // Up to 7 years
-  return ['1M', '3M', '6M', '1Y', '3Y', '5Y'];          // 7+ years
+// ── Per-ticker synthetic metrics for analysis & peer comparison ───────────────
+const TICKER_METRICS = {
+  'VTI':   { pe: 22.4, divYield: 1.32, ret52w: 19.8, proj12m: 10.2, signal: 'hold',       note: 'Broad market core; low cost, maximum diversification.' },
+  'VXUS':  { pe: 14.8, divYield: 2.84, ret52w: 14.2, proj12m:  8.8, signal: 'hold',       note: 'International hedge; benefits from weaker USD cycles.' },
+  'VWO':   { pe: 12.4, divYield: 3.24, ret52w:  8.4, proj12m:  9.2, signal: 'hold',       note: 'Emerging market growth at valuation discount vs US.' },
+  'BND':   { pe: null, divYield: 4.18, ret52w:  3.2, proj12m:  4.4, signal: 'hold',       note: 'Rate-sensitive; hold for income and volatility buffer.' },
+  'TLT':   { pe: null, divYield: 4.52, ret52w: -8.1, proj12m:  6.2, signal: 'hold',       note: 'Long-duration risk; watch Fed signals before adding.' },
+  'GLD':   { pe: null, divYield: 0.00, ret52w: 18.4, proj12m:  8.2, signal: 'overweight', note: 'Inflation hedge with strong momentum and geopolitical bid.' },
+  'AAPL':  { pe: 31.2, divYield: 0.48, ret52w: 12.1, proj12m:  9.4, signal: 'hold',       note: 'Mature growth; high-margin services mix supports premium.' },
+  'MSFT':  { pe: 35.8, divYield: 0.72, ret52w: 16.4, proj12m: 12.1, signal: 'hold',       note: 'Cloud + AI tailwinds support valuation; Copilot monetisation.' },
+  'NVDA':  { pe: 52.1, divYield: 0.03, ret52w: 89.3, proj12m: 22.4, signal: 'overweight', note: 'AI infrastructure demand accelerating; data-center cycle strong.' },
+  'GOOGL': { pe: 24.6, divYield: 0.00, ret52w: 28.4, proj12m: 14.8, signal: 'overweight', note: 'Search + cloud at reasonable valuation; Gemini integration upside.' },
+  'BRK.B': { pe: 14.2, divYield: 0.00, ret52w:  8.4, proj12m:  7.8, signal: 'hold',       note: 'Defensive value; insurance float + operating earnings backstop.' },
+  'JNJ':   { pe: 16.8, divYield: 3.12, ret52w: -4.2, proj12m:  5.1, signal: 'hold',       note: 'Pharma spin-off drag; stable yield with litigation headwinds.' },
+  'VNQ':   { pe: 36.4, divYield: 4.12, ret52w:  2.8, proj12m:  7.4, signal: 'hold',       note: 'Rate-sensitive REIT; set to benefit from rate cuts.' },
+  'SHV':   { pe: null, divYield: 5.12, ret52w:  5.1, proj12m:  4.8, signal: 'hold',       note: 'Cash equivalent; max liquidity, no duration risk.' },
+};
+
+// Peer alternatives per sector — used for switch suggestions and comparison rows
+const SECTOR_ALT_POOL = {
+  'US Equity': [
+    { ticker: 'NVDA',  name: 'NVIDIA Corp.',       pe: 52.1, divYield: 0.03, ret52w: 89.3, proj12m: 22.4 },
+    { ticker: 'META',  name: 'Meta Platforms',      pe: 28.4, divYield: 0.40, ret52w: 41.2, proj12m: 18.4 },
+    { ticker: 'GOOGL', name: 'Alphabet Inc.',        pe: 24.6, divYield: 0.00, ret52w: 28.4, proj12m: 14.8 },
+    { ticker: 'AMZN',  name: 'Amazon.com',           pe: 40.2, divYield: 0.00, ret52w: 32.1, proj12m: 16.2 },
+    { ticker: 'MSFT',  name: 'Microsoft Corp.',      pe: 35.8, divYield: 0.72, ret52w: 16.4, proj12m: 12.1 },
+    { ticker: 'AAPL',  name: 'Apple Inc.',            pe: 31.2, divYield: 0.48, ret52w: 12.1, proj12m:  9.4 },
+    { ticker: 'BRK.B', name: 'Berkshire Hathaway',   pe: 14.2, divYield: 0.00, ret52w:  8.4, proj12m:  7.8 },
+  ],
+  'Intl Equity': [
+    { ticker: 'VXUS', name: 'Total Intl Stock',      pe: 14.8, divYield: 2.84, ret52w: 14.2, proj12m:  8.8 },
+    { ticker: 'VEA',  name: 'Developed Markets ETF', pe: 14.2, divYield: 3.10, ret52w: 16.4, proj12m:  9.4 },
+    { ticker: 'IEFA', name: 'Core MSCI EAFE',        pe: 14.1, divYield: 3.04, ret52w: 15.8, proj12m:  9.1 },
+  ],
+  'Emerging Mkts': [
+    { ticker: 'VWO',  name: 'Vanguard Emerging',     pe: 12.4, divYield: 3.24, ret52w:  8.4, proj12m:  9.2 },
+    { ticker: 'EEM',  name: 'iShares MSCI EM',       pe: 12.1, divYield: 2.80, ret52w:  7.8, proj12m:  8.6 },
+  ],
+  'Bonds': [
+    { ticker: 'BND',  name: 'Total Bond Market',     pe: null, divYield: 4.18, ret52w:  3.2, proj12m:  4.4 },
+    { ticker: 'AGG',  name: 'US Aggregate Bond',     pe: null, divYield: 4.22, ret52w:  3.4, proj12m:  4.6 },
+    { ticker: 'LQD',  name: 'IG Corporate Bond',     pe: null, divYield: 5.14, ret52w:  4.1, proj12m:  5.2 },
+    { ticker: 'TIP',  name: 'TIPS Bond ETF',         pe: null, divYield: 5.48, ret52w:  5.1, proj12m:  5.6 },
+  ],
+  'Real Estate': [
+    { ticker: 'VNQ',  name: 'Vanguard REIT ETF',     pe: 36.4, divYield: 4.12, ret52w:  2.8, proj12m:  7.4 },
+    { ticker: 'O',    name: 'Realty Income Corp.',   pe: 44.2, divYield: 5.84, ret52w:  1.2, proj12m:  8.8 },
+    { ticker: 'PLD',  name: 'Prologis Inc.',         pe: 38.1, divYield: 2.92, ret52w:  6.4, proj12m:  9.2 },
+  ],
+  'Commodities': [
+    { ticker: 'GLD',  name: 'SPDR Gold Shares',      pe: null, divYield: 0.00, ret52w: 18.4, proj12m:  8.2 },
+    { ticker: 'SLV',  name: 'iShares Silver Trust',  pe: null, divYield: 0.00, ret52w: 22.4, proj12m: 11.2 },
+  ],
+};
+
+function getTickerMetrics(ticker) {
+  return TICKER_METRICS[ticker] || { pe: 20, divYield: 1.5, ret52w: 10, proj12m: 8, signal: 'hold', note: 'Broad market exposure.' };
 }
 
-Object.assign(window, { HOLDINGS_UNIVERSE, TRADABLE_UNIVERSE, buildPortfolio, buildPortfolioWithRealData, applyOrdersToPortfolio, SECTOR_COLORS, RISK_LABELS, riskLabelFor, GOALS, MARKET_HEADLINES, AGENT_STEPS, FUTURE_ACTIONS, ACTION_CATEGORIES, WEEKLY_ACTIVITY, getPeriodsForTerm });
+// Returns up to 3 switch suggestions based on portfolio positions
+function generateSwitchSuggestions(positions) {
+  if (!positions || positions.length === 0) return [];
+  const suggestions = [];
+  for (const pos of positions) {
+    const myM = getTickerMetrics(pos.ticker);
+    const alts = (SECTOR_ALT_POOL[pos.sector] || []).filter(a => a.ticker !== pos.ticker);
+    const best = alts.filter(a => a.proj12m - myM.proj12m >= 3).sort((a, b) => b.proj12m - a.proj12m)[0];
+    if (best) {
+      const uplift = +(best.proj12m - myM.proj12m).toFixed(1);
+      suggestions.push({
+        from: pos.ticker, to: best.ticker, toName: best.name, sector: pos.sector,
+        uplift, fromProj: myM.proj12m, toProj: best.proj12m,
+        reason: `${best.ticker} shows stronger 12-month momentum (+${best.ret52w}% 52W, ${best.proj12m}% proj.) vs ${pos.ticker} (${myM.proj12m}% proj.) — same ${pos.sector} exposure, higher return potential.`,
+      });
+    }
+  }
+  return suggestions.sort((a, b) => b.uplift - a.uplift).slice(0, 3);
+}
+
+// Period buttons for historical performance chart (always includes 3Y for 1yr+ terms)
+function getPeriodsForTerm(term) {
+  if (term <= 0.5) return ['1M', '3M', '6M'];
+  if (term <= 1)   return ['1M', '3M', '6M', '1Y'];
+  return ['1M', '3M', '6M', '1Y', '3Y'];
+}
+
+// Derive period buttons from actual series data span so buttons never exceed
+// what's available. Custom max label (e.g. "8M") falls through to fitContent.
+function getPeriodsForSeries(series) {
+  if (!series || series.length < 2) return ['1M'];
+
+  const firstDate = new Date(series[0].time + 'T00:00:00');
+  const lastDate  = new Date(series[series.length - 1].time + 'T00:00:00');
+  const totalMonths = Math.round((lastDate - firstDate) / (1000 * 60 * 60 * 24 * 30.44));
+
+  if (totalMonths <= 1) return ['1M'];
+
+  const STANDARD = [
+    { months: 3,  label: '3M' },
+    { months: 6,  label: '6M' },
+    { months: 12, label: '1Y' },
+    { months: 36, label: '3Y' },
+    { months: 60, label: '5Y' },
+  ];
+
+  const buttons = ['1M'];
+  for (const bp of STANDARD) {
+    if (bp.months < totalMonths) {
+      buttons.push(bp.label);
+    } else if (bp.months === totalMonths) {
+      buttons.push(bp.label);
+      return buttons;
+    } else {
+      // Data doesn't reach the next standard breakpoint — add a custom max label
+      const customLabel = totalMonths % 12 === 0 ? `${totalMonths / 12}Y` : `${totalMonths}M`;
+      if (customLabel !== buttons[buttons.length - 1]) buttons.push(customLabel);
+      return buttons;
+    }
+  }
+  return buttons;
+}
+
+Object.assign(window, { HOLDINGS_UNIVERSE, TRADABLE_UNIVERSE, buildPortfolio, buildPortfolioWithRealData, applyOrdersToPortfolio, SECTOR_COLORS, RISK_LABELS, riskLabelFor, GOALS, MARKET_HEADLINES, AGENT_STEPS, FUTURE_ACTIONS, ACTION_CATEGORIES, WEEKLY_ACTIVITY, getPeriodsForTerm, getPeriodsForSeries, TICKER_METRICS, SECTOR_ALT_POOL, getTickerMetrics, generateSwitchSuggestions });

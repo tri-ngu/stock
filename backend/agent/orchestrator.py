@@ -48,8 +48,8 @@ TOOLS = [
                         "properties": {
                             "sector": {
                                 "type": "string",
-                                "enum": ["tech", "healthcare", "finance", "energy", "consumer", "diversified"],
-                                "description": "Sector to focus on based on user profile"
+                                "enum": ["tech", "healthcare", "finance", "energy", "consumer", "bonds", "real_estate", "international", "diversified"],
+                                "description": "Sector to screen. Use 'bonds' for fixed income, 'real_estate' for REITs, 'international' for non-US exposure."
                             },
                             "market_cap": {
                                 "type": "string",
@@ -189,33 +189,38 @@ class StockAdvisorOrchestrator:
     def __init__(self):
         self.client = Groq()
         self.conversation_history = []
-        self.system_prompt = """You are a knowledgeable stock investment advisor for beginners. Your role is to:
+        self.system_prompt = """You are a diversified portfolio advisor. Build portfolios that vary meaningfully based on each user's risk level and goals.
 
-1. Help users understand stock investing concepts
-2. Analyze stocks and companies thoroughly
-3. Screen stocks based on user goals, risk profile, and market conditions
-4. Build diversified, optimized portfolios matched to their risk tolerance and budget
-5. Explain your recommendations in simple, beginner-friendly language
+MANDATORY WORKFLOW — follow this exact sequence every time:
 
-KEY WORKFLOW FOR PORTFOLIO GENERATION:
-1. First use screen_stocks with criteria aligned to user's GOALS and RISK LEVEL
-   - If user wants retirement/income → prefer sectors with dividends
-   - If user wants wealth building → tech/growth sectors
-   - Pass user_goals to inform stock selection
-2. Then use build_portfolio_recommendation with the screened stocks
-   - Pass the stocks returned from screen_stocks
-   - Include user_goals and time_horizon
-   - This optimizes ONLY over AI-selected stocks, not generic defaults
+STEP 1 — Screen primary equity sector (choose based on goals + risk):
+  - Wealth building / aggressive → sector: "tech" or "finance"
+  - Retirement / income → sector: "consumer" or "healthcare", dividend_yield: "high"
+  - Conservative / capital preservation → sector: "consumer" or "healthcare"
+  - Balanced / moderate → sector: "finance" or "healthcare"
 
-Guidelines:
-- Always prioritize safety and diversification
-- Recommend at least 40-50% in ETFs or bonds for beginners
-- Focus on blue-chip stocks with strong fundamentals
-- Avoid penny stocks and highly speculative investments
-- Be conservative with initial recommendations
-- Always disclose risks and limitations
-- Never guarantee returns or provide specific financial advice without disclaimers
-- IMPORTANT: Use screen_stocks BEFORE build_portfolio_recommendation to ensure AI-driven selection"""
+STEP 2 — Screen bonds (ALWAYS required for diversification):
+  screen_stocks with sector: "bonds"
+  (Skip only if user explicitly asks for 100% equities)
+
+STEP 3 — Screen a SECOND equity sector different from Step 1:
+  Pick a sector NOT already used. Examples:
+  - If Step 1 was "tech" → use "healthcare" or "consumer"
+  - If Step 1 was "finance" → use "energy" or "tech"
+  - If Step 1 was "consumer" → use "finance" or "real_estate"
+
+STEP 4 — Build the portfolio:
+  Call build_portfolio_recommendation with stocks from ALL three screen calls combined.
+  Include user_goals and time_horizon.
+
+DIVERSIFICATION RULES:
+- Never use the same sector twice
+- Always include at least one bond/fixed-income position
+- Conservative (risk < 35): 50%+ bonds, equity from consumer/healthcare
+- Moderate (risk 35–65): 25–35% bonds, equity from 2 different sectors
+- Aggressive (risk > 65): 10–15% bonds, equity growth from tech + one other sector
+
+Keep explanations brief and beginner-friendly. Never guarantee returns."""
 
     def process_message(self, user_message: str) -> Generator[Dict[str, Any], None, None]:
         """Process a user message and yield response chunks."""

@@ -61,6 +61,7 @@ function AIPrototype() {
     autoRisk: false,
   });
   const [scheduleModal, setScheduleModal] = useS({ open: false });
+  const [hasPurchased, setHasPurchased] = useS(false);
 
   // AI-powered portfolio generation with real market data
   const goGenerateAI = async () => {
@@ -101,32 +102,24 @@ function AIPrototype() {
 
       setPortfolio({
         ...builtPortfolio,
-        agentReasoning: result.agentReasoning // Include reasoning steps
+        agentReasoning: result.agentReasoning
       });
-      setChartPeriod('1Y');
+      const periods = typeof window.getPeriodsForSeries === 'function'
+        ? window.getPeriodsForSeries(builtPortfolio.series)
+        : ['1M', '3M', '6M', '1Y', '3Y'];
+      setChartPeriod(periods[periods.length - 1]);
       setAIGenerating(false);
-      setScreen('dashboard-preauth');
+      // Screen transition driven by GeneratingScreen once animation + AI are both done
     } catch (error) {
       console.error('AI generation failed:', error);
+      const fallbackPortfolio = buildPortfolio(profile.budget, profile.risk, profile.term);
+      setPortfolio(fallbackPortfolio);
+      const fallbackPeriods = typeof window.getPeriodsForSeries === 'function'
+        ? window.getPeriodsForSeries(fallbackPortfolio.series)
+        : ['1M', '3M', '6M', '1Y', '3Y'];
+      setChartPeriod(fallbackPeriods[fallbackPeriods.length - 1]);
       setAIGenerating(false);
-      // Fallback: use real data with default tickers
-      try {
-        const defaultTickers = ['VTI', 'VXUS', 'BND', 'AAPL', 'MSFT'];
-        const builtPortfolio = await window.buildPortfolioWithRealData(
-          profile.budget,
-          profile.risk,
-          profile.term,
-          defaultTickers
-        );
-        setPortfolio(builtPortfolio);
-      } catch (realDataError) {
-        console.error('Real data fallback failed:', realDataError);
-        // Last resort: synthetic data
-        const builtPortfolio = buildPortfolio(profile.budget, profile.risk, profile.term);
-        setPortfolio(builtPortfolio);
-      }
-      setChartPeriod('1Y');
-      setScreen('dashboard-preauth');
+      // Screen transition driven by GeneratingScreen
     }
   };
 
@@ -148,6 +141,20 @@ function AIPrototype() {
   const applyPending = () => {
     setPortfolio((p) => applyOrdersToPortfolio(p, pendingOrders));
     setPendingOrders([]);
+  };
+
+  const handleSwitchAccepted = (from, to) => {
+    setPortfolio(prev => {
+      if (!prev) return prev;
+      const allAlts = Object.values(window.SECTOR_ALT_POOL || {}).flat();
+      const toInfo = allAlts.find(a => a.ticker === to);
+      return {
+        ...prev,
+        positions: prev.positions.map(p =>
+          p.ticker !== from ? p : { ...p, ticker: to, name: toInfo?.name || to }
+        ),
+      };
+    });
   };
 
   return (
@@ -181,8 +188,9 @@ function AIPrototype() {
         <GeneratingScreen
           copy={copy}
           profile={profile}
-          onComplete={() => {}}
+          onComplete={() => setScreen('dashboard-preauth')}
           autoPlay={aiGenerating}
+          isLoading={aiGenerating}
         />
       )}
 
@@ -201,10 +209,10 @@ function AIPrototype() {
           }}
           onCounsel={() => setScreen('counsel')}
           onModify={() => setScreen('modify-profile')}
+          automation={automation}
           currentScreen="portfolio"
-          onNavigate={(screen) => {
-            if (screen === 'counsel') setScreen('counsel');
-            // TODO: Implement Activity and Settings views
+          onNavigate={(s) => {
+            if (s === 'counsel') setScreen('counsel');
           }}
         />
       )}
@@ -252,7 +260,7 @@ function AIPrototype() {
         <Success
           copy={copy}
           portfolio={portfolio}
-          onDone={() => setScreen('dashboard')}
+          onDone={() => { setHasPurchased(true); setScreen('dashboard'); }}
         />
       )}
 
@@ -274,10 +282,11 @@ function AIPrototype() {
           }}
           onBuy={() => setScreen('counsel')}
           onCounsel={() => setScreen('counsel')}
+          onModify={() => setScreen('modify-profile')}
+          automation={automation}
           currentScreen="portfolio"
-          onNavigate={(screen) => {
-            if (screen === 'counsel') setScreen('counsel');
-            // TODO: Implement Activity and Settings views
+          onNavigate={(s) => {
+            if (s === 'counsel') setScreen('counsel');
           }}
         />
       )}
@@ -293,7 +302,8 @@ function AIPrototype() {
           }}
           scheduleModal={scheduleModal}
           setScheduleModal={setScheduleModal}
-          onBack={() => setScreen(portfolio ? 'dashboard' : 'dashboard-preauth')}
+          onSwitchAccepted={handleSwitchAccepted}
+          onBack={() => setScreen(hasPurchased ? 'dashboard' : 'dashboard-preauth')}
         />
       )}
 
@@ -304,7 +314,7 @@ function AIPrototype() {
           setProfile={setProfile}
           riskStyle={DEFAULT_RISK_STYLE}
           density="regular"
-          onBack={() => setScreen('dashboard')}
+          onBack={() => setScreen(hasPurchased ? 'dashboard' : 'dashboard-preauth')}
           onContinue={goGenerateAI}
         />
       )}

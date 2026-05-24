@@ -1,8 +1,22 @@
 # Stock Advisor AI - Progress Tracker
 
-## Current Status: Interactive Features Complete ✅ 
+## Current Status: Button Fixes + Groq AI Live ✅
 
-### Session 2026-05-12 (Latest): Full Interactive Features Implementation
+### Session 2026-05-23 (Latest): Button Fixes & API Key
+
+**Completed This Session:**
+- ✅ Added Groq API key to `.env` — AI agent now functional (no more 500 errors)
+- ✅ Fixed portfolio diversity: expanded sector universes (15 candidates each), added bonds/real_estate/international, random shuffle before selection, cap raised 5→8 stocks
+- ✅ Fixed historical chart data depth: daily prices → monthly aggregates (36 months max)
+- ✅ Fixed chart buttons: `getPeriodsForSeries` derives buttons from actual data span
+- ✅ Added `StockAnalysis` component to Counsel: per-holding peer comparison table (P/E, yield, 52W, 12M proj., signal)
+- ✅ Added sector rotation switch suggestions in Counsel recommended actions
+- ✅ Fixed MODIFY button: added `hasPurchased` state; back buttons in modify-profile and Counsel now correctly return to `dashboard-preauth` vs `dashboard` depending on purchase status; added `onModify` to live dashboard
+- ✅ Fixed Review button: added `ReviewModal` (similar to `ScheduleModal`) with Accept/Dismiss; button shows status badge after review
+
+---
+
+### Session 2026-05-12 (Previous): Full Interactive Features Implementation
 
 **Completed This Session:**
 - ✅ Fixed Unicode smart quotes bug blocking JSX parsing
@@ -93,38 +107,17 @@
 
 ### 🔴 CRITICAL - High Priority
 
-1. **Fix Graph Data & Interactivity** (Blocking User Experience)
-   - **Problem**: Chart buttons work, but graph doesn't change based on period selection
-   - **Problem**: Graph doesn't reflect actual stock price data from portfolio
-   - **File**: `frontend/screens-portfolio.jsx` (AreaChart component, line ~225)
-   - **File**: `frontend/data.jsx` (buildPortfolio function - generates portfolio.series)
-   - **Tasks**:
-     - Connect chartPeriod state to filter portfolio.series data
-     - Implement data generation for different time periods (1M, 6M, 1Y, 5Y, Max)
-     - Calculate realistic price movements based on actual stock volatility
-     - Update AreaChart to display filtered data
-   - **Status**: Buttons work, data filtering not implemented
+1. **Portfolio Always Generates Same Stocks** (Fixed 2026-05-23)
+   - **Was**: Every portfolio included AAPL and MSFT regardless of goals/risk. Root causes: static deterministic lists, single-sector screening with no bonds, AI prompt never enforced multi-sector calls, 5-stock cap.
+   - **Fix**: Expanded universes to 15 candidates/sector; added `bonds`, `real_estate`, `international` sectors; `random.shuffle` before selection; system prompt mandates 3 `screen_stocks` calls (primary equity + bonds + second equity) per build; portfolio cap raised 5→8; tool definition updated with new sectors.
+   - **Files**: `backend/agent/tools.py`, `backend/agent/orchestrator.py`
+   - **Status**: ✅ Complete
 
-2. **Schedule Modal - Better UX** (Replace Clunky Alert)
-   - **Problem**: Schedule button triggers browser alert() - not professional
-   - **File**: `frontend/screens-portfolio.jsx` line ~656 (Schedule button)
-   - **Tasks**:
-     - Create `ScheduleModal` component similar to BuyConfirm
-     - Show action details and scheduling options
-     - Remove Face ID authorization (just simple confirmation)
-     - Update Schedule button onClick to open modal instead of alert
-     - Connect modal to setAutomation state handler
-   - **Status**: Alert placeholder exists, needs modal component
-
-3. **Activity & Settings Pages**
-   - **Status**: Currently show "coming soon" alerts
-   - **Pending**: User will provide .html files from Claude Design
-   - **Tasks**:
-     - Implement Activity page from design HTML
-     - Implement Settings page from design HTML
-     - Wire them into screen routing (app-ai.jsx)
-     - Add state management for settings if needed
-   - **Status**: Awaiting design files
+2. **Historical Performance Graph — Data Depth** (Fixed 2026-05-23)
+   - **Was**: Chart buttons responded correctly but `series` only held ~60 daily points (~3 months) when using real market data
+   - **Fix**: `buildPortfolioWithRealData` aggregates daily prices to monthly closes, keeps last 36 months; `getPeriodsForSeries` derives buttons from actual data span; `app-ai.jsx` sets initial period to max available
+   - **Files**: `frontend/data.jsx`, `frontend/screens-portfolio.jsx`, `frontend/app-ai.jsx`
+   - **Status**: ✅ Complete
 
 ### 🟡 Medium Priority
 - Test full user flow: Welcome → Profile → Generate → Dashboard → Counsel → Trading

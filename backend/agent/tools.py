@@ -1,3 +1,4 @@
+import random
 import yfinance as yf
 import numpy as np
 from datetime import datetime, timedelta
@@ -50,57 +51,57 @@ def screen_stocks(criteria: Dict[str, Any]) -> Dict[str, Any]:
     }
     """
 
-    # Dynamic universe by sector - AI chooses sector based on user goals
+    # Expanded universe — 12-15 candidates per sector for variety
     stock_universe = {
-        'tech': ['AAPL', 'MSFT', 'NVDA', 'META', 'CRM', 'ADBE', 'NFLX', 'TSLA'],
-        'healthcare': ['JNJ', 'UNH', 'PFE', 'ABBV', 'TMO', 'MRK', 'LLY', 'BMY'],
-        'finance': ['JPM', 'BAC', 'GS', 'MS', 'BLK', 'SCHW', 'CB', 'ICE'],
-        'energy': ['XOM', 'CVX', 'COP', 'SLB', 'MPC', 'HES', 'EOG', 'PSX'],
-        'consumer': ['PG', 'KO', 'WMT', 'HD', 'MCD', 'COST', 'NKE', 'SBUX'],
-        'diversified': ['VTI', 'VOO', 'VTSAX', 'SPY', 'IVV', 'SCHB', 'FSKAX', 'SWTSX']
+        'tech':          ['NVDA', 'META', 'GOOGL', 'AMZN', 'AMD', 'AVGO', 'ORCL', 'CRM', 'ADBE', 'NFLX', 'QCOM', 'TSLA', 'INTC', 'MSFT', 'AAPL'],
+        'healthcare':    ['LLY', 'UNH', 'ABBV', 'TMO', 'ABT', 'MDT', 'AMGN', 'GILD', 'REGN', 'VRTX', 'BMY', 'CI', 'HUM', 'JNJ', 'MRK'],
+        'finance':       ['BLK', 'GS', 'JPM', 'MS', 'AXP', 'COF', 'PGR', 'ICE', 'CME', 'SPGI', 'CB', 'TRV', 'PRU', 'BAC', 'SCHW'],
+        'energy':        ['EOG', 'COP', 'HES', 'DVN', 'OXY', 'MPC', 'VLO', 'PSX', 'KMI', 'WMB', 'SLB', 'HAL', 'XOM', 'CVX', 'ET'],
+        'consumer':      ['COST', 'HD', 'LOW', 'TGT', 'NKE', 'SBUX', 'YUM', 'DG', 'DLTR', 'MCD', 'PG', 'KO', 'PEP', 'CL', 'WMT'],
+        'bonds':         ['BND', 'AGG', 'LQD', 'TLT', 'IEF', 'SHV', 'HYG', 'TIP', 'MUB', 'VCIT', 'VCSH', 'BSV'],
+        'real_estate':   ['PLD', 'AMT', 'EQIX', 'CCI', 'PSA', 'VNQ', 'O', 'AVB', 'EXR', 'SPG'],
+        'international': ['VXUS', 'EFA', 'VWO', 'IEFA', 'VEA', 'EEM', 'IEMG', 'DGS', 'SPDW', 'ACWX'],
+        'diversified':   ['VTI', 'VOO', 'SPY', 'IVV', 'SCHB', 'VIG', 'DGRO', 'NOBL', 'DVY', 'QQQ'],
     }
 
     sector = criteria.get('sector', 'diversified').lower()
-    market_cap_pref = criteria.get('market_cap', 'large').lower()
     dividend_pref = criteria.get('dividend_yield', 'moderate').lower()
     user_goals = criteria.get('user_goals', [])
 
-    # Get candidates from selected sector
-    candidates = stock_universe.get(sector, stock_universe['diversified'])
+    # Shuffle so each call surfaces different stocks from the same sector
+    candidates = list(stock_universe.get(sector, stock_universe['diversified']))
+    random.shuffle(candidates)
 
     screened = []
-
     for ticker in candidates:
         try:
             info = get_stock_info(ticker)
             if "error" in info:
                 continue
 
-            # If user goal is 'income' or 'retire', prefer high dividend
-            if 'income' in user_goals or 'retire' in user_goals:
+            # Income / retirement: require meaningful dividend yield
+            if ('income' in user_goals or 'retire' in user_goals) and dividend_pref == 'high':
                 div_yield = info.get('dividendYield', 0) or 0
-                if dividend_pref == 'high' and div_yield < 0.02:
+                if div_yield < 0.015:
                     continue
-                if dividend_pref == 'moderate' and div_yield < 0.01:
-                    continue
-
-            # If user goal is 'wealth' or 'house', prefer growth
-            if 'wealth' in user_goals and dividend_pref == 'growth':
-                pass  # No dividend filter
 
             screened.append(ticker)
-
         except Exception as e:
             logger.error(f"Error screening {ticker}: {e}")
             continue
 
-    reasoning = f"Selected {sector.title()} sector stocks aligned with goals: {', '.join(user_goals) if user_goals else 'balanced'}"
+    # Fall back to unfiltered shuffle slice if filter removed too many
+    if len(screened) < 3:
+        screened = candidates[:5]
+
+    result_stocks = screened[:5]
+    reasoning = f"Screened {sector.title()} sector — selected {len(result_stocks)} securities for goals: {', '.join(user_goals) if user_goals else 'balanced growth'}"
 
     return {
-        'stocks': screened[:6],
+        'stocks': result_stocks,
         'sector': sector,
         'reasoning': reasoning,
-        'count': len(screened[:6])
+        'count': len(result_stocks)
     }
 
 def get_historical_data(ticker: str, period: str = "5y") -> Dict[str, Any]:
@@ -259,8 +260,8 @@ def build_portfolio_recommendation(
         total = sum(allocation.values())
         allocation = {k: v / total for k, v in allocation.items()}
 
-        # Use AI-selected stocks for optimization
-        portfolio_tickers = stocks[:5] if len(stocks) >= 5 else stocks
+        # Use AI-selected stocks for optimization (up to 8 for diversity)
+        portfolio_tickers = stocks[:8] if len(stocks) >= 8 else stocks
 
         # Optimize portfolio on AI-selected stocks
         optimized = optimize_portfolio(portfolio_tickers)

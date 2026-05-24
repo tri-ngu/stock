@@ -18,9 +18,12 @@ function ChartComponent(props) {
 }
 
 // ── Generating screen ────────────────────────────────────────────────────
-function GeneratingScreen({ copy, profile, onComplete, autoPlay = true }) {
+function GeneratingScreen({ copy, profile, onComplete, autoPlay = true, isLoading = true }) {
   const [stepIdx, setStepIdx] = useState2(0);
-  const [done, setDone] = useState2(false);
+  const [animDone, setAnimDone] = useState2(false);
+  // Only consider truly done when both animation finished AND AI has responded
+  const done = animDone && !isLoading;
+
   useEffect2(() => {
     if (!autoPlay) return;
     const total = AGENT_STEPS.length;
@@ -28,11 +31,17 @@ function GeneratingScreen({ copy, profile, onComplete, autoPlay = true }) {
     const tick = () => {
       setStepIdx(i);
       i++;
-      if (i > total) { setDone(true); setTimeout(onComplete, 600); return; }
+      // Stop at last step — keep it spinning until AI finishes
+      if (i >= total) { setAnimDone(true); return; }
       setTimeout(tick, 950 + Math.random() * 400);
     };
     tick();
   }, []);
+
+  // Transition once both animation and AI are complete
+  useEffect2(() => {
+    if (animDone && !isLoading) setTimeout(onComplete, 600);
+  }, [animDone, isLoading]);
 
   return (
     <div style={{ height: '100%', background: 'var(--bg)', color: 'var(--ink)', display: 'flex', flexDirection: 'column' }}>
@@ -162,7 +171,7 @@ function Spinner() {
 }
 
 // ── Dashboard ────────────────────────────────────────────────────────────
-function Dashboard({ copy, profile, portfolio, density, mode = 'initial', pendingOrders = [], onAddOrder, onRemoveOrder, onAuthorize, onBuy, onCounsel, onModify, chartPeriod = 'Max', onChartPeriodChange, currentScreen, onNavigate }) {
+function Dashboard({ copy, profile, portfolio, density, mode = 'initial', pendingOrders = [], onAddOrder, onRemoveOrder, onAuthorize, onBuy, onCounsel, onModify, chartPeriod = 'Max', onChartPeriodChange, currentScreen, onNavigate, automation = {} }) {
   const [expanded, setExpanded] = useState2(null);
   const [projectedChartPeriod, setProjectedChartPeriod] = useState2('1Y');
   const compact = density === 'compact';
@@ -248,15 +257,21 @@ function Dashboard({ copy, profile, portfolio, density, mode = 'initial', pendin
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
-                {(typeof window.getPeriodsForTerm === 'function' ? window.getPeriodsForTerm(portfolio.term) : ['1M', '6M', '1Y', '5Y', 'Max']).map((r) => (
-                  <button key={r} onClick={() => onChartPeriodChange && onChartPeriodChange(r)} style={{
-                    fontFamily: 'JetBrains Mono, monospace', fontSize: 10,
-                    padding: '4px 10px', background: chartPeriod === r ? 'var(--ink)' : 'transparent',
-                    color: chartPeriod === r ? 'var(--bg)' : 'var(--ink-soft)',
-                    border: '1px solid var(--rule)', cursor: 'pointer',
-                    letterSpacing: '0.1em', transition: 'all 0.2s',
-                  }}>{r}</button>
-                ))}
+                {(() => {
+                  const periods = typeof window.getPeriodsForSeries === 'function'
+                    ? window.getPeriodsForSeries(portfolio.series)
+                    : ['1M', '3M', '6M', '1Y', '3Y'];
+                  const activePeriod = periods.includes(chartPeriod) ? chartPeriod : periods[periods.length - 1];
+                  return periods.map((r) => (
+                    <button key={r} onClick={() => onChartPeriodChange && onChartPeriodChange(r)} style={{
+                      fontFamily: 'JetBrains Mono, monospace', fontSize: 10,
+                      padding: '4px 10px', background: activePeriod === r ? 'var(--ink)' : 'transparent',
+                      color: activePeriod === r ? 'var(--bg)' : 'var(--ink-soft)',
+                      border: '1px solid var(--rule)', cursor: 'pointer',
+                      letterSpacing: '0.1em', transition: 'all 0.2s',
+                    }}>{r}</button>
+                  ));
+                })()}
               </div>
             </div>
             <div style={{ height: 220, border: "1px solid var(--rule)", background: "var(--surface)" }}>
@@ -495,17 +510,25 @@ function Dashboard({ copy, profile, portfolio, density, mode = 'initial', pendin
           <div>
             <Eyebrow style={{ marginBottom: 10 }}>Upcoming automation</Eyebrow>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {ACTION_CATEGORIES.filter((cat) => {
-                const key = cat.tweakKey;
-                return typeof key === 'string' && key.startsWith('auto');
-              }).map((cat, i) => (
-                <div key={i} style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
-                  <div style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--ink)' }}>{cat.label}</div>
-                  <div style={{ fontSize: 10.5, color: 'var(--ink-soft)', marginTop: 2 }}>
-                    {cat.actions.length} action{cat.actions.length === 1 ? '' : 's'} queued
+              {(() => {
+                const enabled = ACTION_CATEGORIES.filter(cat => cat.tweakKey && automation[cat.tweakKey]);
+                if (!enabled.length) return (
+                  <div style={{ fontSize: 11.5, color: 'var(--ink-mute)', fontStyle: 'italic', paddingTop: 4 }}>
+                    No automations enabled — configure in Counsel.
                   </div>
-                </div>
-              ))}
+                );
+                return enabled.map((cat, i) => (
+                  <div key={i} style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 5, height: 5, borderRadius: 3, background: 'var(--gain)', display: 'inline-block' }} />
+                      <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--ink)' }}>{cat.label}</span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: 'var(--ink-soft)', marginTop: 2 }}>
+                      {cat.actions.length} action{cat.actions.length === 1 ? '' : 's'} queued
+                    </div>
+                  </div>
+                ));
+              })()}
             </div>
           </div>
 
@@ -772,11 +795,124 @@ function ScheduleModal({ action, onSchedule, onCancel }) {
   );
 }
 
+// ── Review Switch Modal ───────────────────────────────────────────────
+function ReviewModal({ sw, onAccept, onDismiss, onCancel }) {
+  return (
+    <div onClick={onCancel} style={{
+      position: 'absolute', inset: 0, background: 'rgba(20,18,12,0.55)', backdropFilter: 'blur(12px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40, zIndex: 50,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: 'var(--bg)', color: 'var(--ink)',
+        width: 520, padding: '40px 44px',
+        border: '1px solid var(--ink)', boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <Eyebrow>Sector rotation · review</Eyebrow>
+          <button onClick={onCancel} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--ink-mute)' }}>ESC</button>
+        </div>
+        <div style={{ fontFamily: 'Newsreader, serif', fontSize: 28, lineHeight: 1.1, marginTop: 6 }}>
+          Switch {sw.from} → {sw.to}.
+        </div>
+        <div style={{ fontFamily: 'Newsreader, serif', fontStyle: 'italic', fontSize: 15, color: 'var(--ink-soft)', marginTop: 8 }}>
+          {sw.reason}
+        </div>
+        <div style={{ marginTop: 24, borderTop: '1px solid var(--rule)', paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div style={{ border: '1px solid var(--rule)', padding: 16 }}>
+              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-mute)', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 8 }}>Current · {sw.from}</div>
+              <div style={{ fontFamily: 'Newsreader, serif', fontSize: 22, color: 'var(--ink-mute)' }}>+{sw.fromProj}%</div>
+              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: 'var(--ink-mute)', marginTop: 4 }}>12M projected</div>
+            </div>
+            <div style={{ border: '1px solid var(--gain)', padding: 16 }}>
+              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--gain)', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 8 }}>Suggested · {sw.to}</div>
+              <div style={{ fontFamily: 'Newsreader, serif', fontSize: 22, color: 'var(--gain)' }}>+{sw.toProj}%</div>
+              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: 'var(--ink-mute)', marginTop: 4 }}>12M projected · +{sw.uplift}% uplift</div>
+            </div>
+          </div>
+          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10.5, color: 'var(--gain)', padding: '8px 12px', border: '1px solid var(--gain)', background: 'color-mix(in oklab, var(--gain) 5%, transparent)' }}>
+            {sw.sector} · projected uplift +{sw.uplift}%
+          </div>
+        </div>
+        <div style={{ marginTop: 28, display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+          <Button variant="ghost" onClick={onDismiss}>Dismiss</Button>
+          <Button onClick={onAccept}>Accept switch →</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Individual holding analysis with peer comparison ─────────────────
+function StockAnalysis({ portfolio }) {
+  if (!portfolio?.positions?.length) return null;
+  const getM = typeof window.getTickerMetrics === 'function' ? window.getTickerMetrics : () => ({ pe: 20, divYield: 1.5, ret52w: 10, proj12m: 8, signal: 'hold', note: '' });
+  const altPool = window.SECTOR_ALT_POOL || {};
+
+  return (
+    <div style={{ padding: '32px 64px', borderTop: '2px solid var(--ink)' }}>
+      <Eyebrow style={{ marginBottom: 18 }}>Holdings analysis · peer comparison</Eyebrow>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {portfolio.positions.map((pos, i) => {
+          const m = getM(pos.ticker);
+          const peers = (altPool[pos.sector] || []).filter(a => a.ticker !== pos.ticker).slice(0, 2);
+          const rows = [{ ticker: pos.ticker, name: pos.name, ...m, isSelf: true }, ...peers.map(p => ({ ...p, isSelf: false }))];
+          const signalCol = m.signal === 'overweight' ? 'var(--gain)' : m.signal === 'reduce' ? 'var(--loss)' : 'var(--ink-mute)';
+          return (
+            <div key={pos.ticker} style={{ borderTop: i === 0 ? '1px solid var(--ink)' : '1px solid var(--rule)', padding: '18px 0' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr auto', gap: 20, alignItems: 'flex-start', marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 14, fontWeight: 600 }}>{pos.ticker}</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 3 }}>{pos.name}</div>
+                  <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5, color: 'var(--ink-mute)', marginTop: 3, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{pos.sector}</div>
+                </div>
+                <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', fontStyle: 'italic', lineHeight: 1.5, paddingTop: 2 }}>{m.note}</div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5, color: signalCol, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{m.signal}</div>
+                  <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--ink-mute)', marginTop: 3 }}>{(pos.weight * 100).toFixed(1)}% weight</div>
+                </div>
+              </div>
+              {rows.length > 0 && (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>
+                  <thead>
+                    <tr>{['', 'P/E', 'Yield', '52W', '12M Proj.'].map((h, hi) => (
+                      <th key={hi} style={{ textAlign: hi === 0 ? 'left' : 'right', padding: '4px 10px', color: 'var(--ink-mute)', fontWeight: 400, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', borderBottom: '1px solid var(--rule)' }}>{h}</th>
+                    ))}</tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row, ri) => (
+                      <tr key={row.ticker} style={{ background: row.isSelf ? 'color-mix(in oklab, var(--ink) 5%, transparent)' : 'transparent' }}>
+                        <td style={{ padding: '7px 10px', fontWeight: row.isSelf ? 600 : 400 }}>
+                          {row.ticker}
+                          {row.isSelf && <span style={{ color: 'var(--ink-mute)', fontWeight: 400, marginLeft: 6, fontSize: 9.5 }}>← holding</span>}
+                          {!row.isSelf && row.proj12m > m.proj12m && <span style={{ color: 'var(--gain)', fontWeight: 600, marginLeft: 6, fontSize: 9.5 }}>↑ better</span>}
+                        </td>
+                        <td style={{ padding: '7px 10px', textAlign: 'right', color: 'var(--ink-soft)' }}>{row.pe != null ? row.pe.toFixed(1) : '—'}</td>
+                        <td style={{ padding: '7px 10px', textAlign: 'right', color: 'var(--ink-soft)' }}>{row.divYield > 0 ? row.divYield.toFixed(2) + '%' : '—'}</td>
+                        <td style={{ padding: '7px 10px', textAlign: 'right' }}><Delta value={row.ret52w} /></td>
+                        <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: (!row.isSelf && row.proj12m > m.proj12m) ? 600 : 400, color: (!row.isSelf && row.proj12m > m.proj12m) ? 'var(--gain)' : 'inherit' }}>
+                          +{row.proj12m.toFixed(1)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Counsel / Recommendations ────────────────────────────────────────
-function Counsel({ copy, profile, portfolio, automation, setAutomation, onBack, scheduleModal, setScheduleModal }) {
+function Counsel({ copy, profile, portfolio, automation, setAutomation, onBack, scheduleModal, setScheduleModal, onSwitchAccepted }) {
   const auto = automation || {};
   const setAuto = setAutomation || (() => {});
   const [scheduled, setScheduled] = useState2({});
+  const [reviewModal, setReviewModal] = useState2(null);
+  const [reviewed, setReviewed] = useState2({});
   return (
     <div style={{ height: '100%', background: 'var(--bg)', color: 'var(--ink)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 40px', borderBottom: '1px solid var(--rule)' }}>
@@ -797,6 +933,9 @@ function Counsel({ copy, profile, portfolio, automation, setAutomation, onBack, 
 
         {/* Weekly activity — full-width editorial section */}
         <WeeklyActivity portfolio={portfolio} />
+
+        {/* Per-holding analysis with peer comparison */}
+        <StockAnalysis portfolio={portfolio} />
 
         <div style={{ padding: '32px 64px', display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 48 }}>
           {/* Recommendations column */}
@@ -883,6 +1022,57 @@ function Counsel({ copy, profile, portfolio, automation, setAutomation, onBack, 
               })}
             </div>
 
+            {/* Dynamic stock switch suggestions derived from holdings */}
+            {(() => {
+              const switches = typeof window.generateSwitchSuggestions === 'function'
+                ? window.generateSwitchSuggestions(portfolio?.positions || [])
+                : [];
+              if (!switches.length) return null;
+              return (
+                <div style={{ marginTop: 36 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 14 }}>
+                    <Eyebrow>Sector rotation · switch candidates</Eyebrow>
+                    <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: 'var(--ink-mute)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>{switches.length} suggestion{switches.length === 1 ? '' : 's'}</div>
+                  </div>
+                  <div style={{ borderTop: '1px solid var(--ink)' }}>
+                    {switches.map((sw, si) => (
+                      <div key={si} style={{ borderBottom: '1px solid var(--rule)', padding: '14px 0', display: 'grid', gridTemplateColumns: '110px 1fr auto', gap: 16, alignItems: 'flex-start' }}>
+                        <div style={{ paddingTop: 2 }}>
+                          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: 'var(--ink-mute)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>On review</div>
+                          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: 'var(--ink-mute)', marginTop: 4 }}>{sw.sector}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontFamily: 'Newsreader, serif', fontSize: 16, lineHeight: 1.25 }}>
+                            Switch {sw.from} <span style={{ color: 'var(--ink-mute)' }}>→</span> {sw.to}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 3, maxWidth: 440 }}>{sw.reason}</div>
+                          <div style={{ marginTop: 6, fontFamily: 'JetBrains Mono, monospace', fontSize: 10.5, color: 'var(--gain)' }}>
+                            +{sw.uplift}% projected uplift · {sw.fromProj}% → {sw.toProj}% (12M)
+                          </div>
+                        </div>
+                        <div style={{ paddingTop: 4 }}>
+                          {reviewed[`${sw.from}-${sw.to}`] ? (
+                            <span style={{
+                              fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5,
+                              padding: '4px 8px',
+                              border: `1px solid ${reviewed[`${sw.from}-${sw.to}`] === 'accepted' ? 'var(--gain)' : 'var(--rule)'}`,
+                              color: reviewed[`${sw.from}-${sw.to}`] === 'accepted' ? 'var(--gain)' : 'var(--ink-mute)',
+                              letterSpacing: '0.12em', textTransform: 'uppercase',
+                              display: 'inline-flex', alignItems: 'center', gap: 5,
+                            }}>
+                              {reviewed[`${sw.from}-${sw.to}`] === 'accepted' ? '✓ Accepted' : '— Dismissed'}
+                            </span>
+                          ) : (
+                            <Button variant="ghost" onClick={() => setReviewModal(sw)} style={{ padding: '5px 12px', fontSize: 11 }}>Review</Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             <Eyebrow style={{ marginTop: 40, marginBottom: 14 }}>Market headlines · curated</Eyebrow>
             <div style={{ borderTop: '1px solid var(--ink)' }}>
               {MARKET_HEADLINES.map((h, i) => (
@@ -948,6 +1138,22 @@ function Counsel({ copy, profile, portfolio, automation, setAutomation, onBack, 
           </aside>
         </div>
       </div>
+
+      {reviewModal && (
+        <ReviewModal
+          sw={reviewModal}
+          onAccept={() => {
+            setReviewed(prev => ({ ...prev, [`${reviewModal.from}-${reviewModal.to}`]: 'accepted' }));
+            if (onSwitchAccepted) onSwitchAccepted(reviewModal.from, reviewModal.to);
+            setReviewModal(null);
+          }}
+          onDismiss={() => {
+            setReviewed(prev => ({ ...prev, [`${reviewModal.from}-${reviewModal.to}`]: 'dismissed' }));
+            setReviewModal(null);
+          }}
+          onCancel={() => setReviewModal(null)}
+        />
+      )}
 
       {scheduleModal?.open && (
         <ScheduleModal
