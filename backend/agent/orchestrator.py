@@ -188,7 +188,6 @@ TOOLS = [
 class StockAdvisorOrchestrator:
     def __init__(self):
         self.client = Groq()
-        self.conversation_history = []
         self.system_prompt = """You are a diversified portfolio advisor. Build portfolios that vary meaningfully based on each user's risk level and goals.
 
 MANDATORY WORKFLOW — follow this exact sequence every time:
@@ -224,14 +223,10 @@ Keep explanations brief and beginner-friendly. Never guarantee returns."""
 
     def process_message(self, user_message: str) -> Generator[Dict[str, Any], None, None]:
         """Process a user message and yield response chunks."""
-        self.conversation_history.append({
-            "role": "user",
-            "content": user_message
-        })
+        # Build messages locally in OpenAI/Groq format (not Anthropic format)
+        messages = [{"role": "user", "content": user_message}]
 
-        messages = self.conversation_history.copy()
-
-        while True:
+        for _ in range(10):  # safety cap on iterations
             api_messages = [{"role": "system", "content": self.system_prompt}] + messages
             response = self.client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
@@ -240,86 +235,43 @@ Keep explanations brief and beginner-friendly. Never guarantee returns."""
                 messages=api_messages
             )
 
-            # Process response content
-            assistant_content = []
-            tool_calls = []
-            text_response = ""
-
             message = response.choices[0].message
 
-            # Get text content
+            # Yield any text content
             if message.content:
-                text_response = message.content
-                assistant_content.append({
-                    "type": "text",
-                    "text": message.content
-                })
-                yield {
-                    "type": "text",
-                    "content": message.content
-                }
+                yield {"type": "text", "content": message.content}
 
-            # Get tool calls
-            if message.tool_calls:
-                for tool_call in message.tool_calls:
-                    tool_calls.append(tool_call)
-                    assistant_content.append({
-                        "type": "tool_use",
-                        "id": tool_call.id,
-                        "name": tool_call.function.name,
-                        "input": json.loads(tool_call.function.arguments)
-                    })
-
-            # If no tool calls, we're done
-            if response.choices[0].finish_reason == "stop" or not tool_calls:
-                if text_response:
-                    self.conversation_history.append({
-                        "role": "assistant",
-                        "content": assistant_content
-                    })
+            # No tool calls or model signalled stop — we're done
+            if not message.tool_calls or response.choices[0].finish_reason == "stop":
                 break
 
-            # Add assistant response to history
-            if assistant_content:
-                self.conversation_history.append({
-                    "role": "assistant",
-                    "content": assistant_content
-                })
+            # Append assistant turn in OpenAI format (tool_calls as structured list)
+            messages.append({
+                "role": "assistant",
+                "content": message.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.function.name, "arguments": tc.function.arguments}
+                    }
+                    for tc in message.tool_calls
+                ]
+            })
 
-            # Process tool calls
-            tool_results = []
-            for tool_call in tool_calls:
+            # Execute each tool and append result with role "tool" (OpenAI format)
+            for tool_call in message.tool_calls:
                 tool_name = tool_call.function.name
                 tool_input = json.loads(tool_call.function.arguments)
                 result = self._execute_tool(tool_name, tool_input)
 
-                yield {
-                    "type": "tool_call",
-                    "tool": tool_name,
-                    "input": tool_input,
-                    "result": result
-                }
+                yield {"type": "tool_call", "tool": tool_name, "input": tool_input, "result": result}
 
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_call.id,
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
                     "content": json.dumps(result)
                 })
-
-            # Add tool results to messages for next iteration
-            messages.append({
-                "role": "assistant",
-                "content": assistant_content
-            })
-            messages.append({
-                "role": "user",
-                "content": tool_results
-            })
-
-            self.conversation_history.append({
-                "role": "user",
-                "content": tool_results
-            })
 
     def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a tool and return the result."""
