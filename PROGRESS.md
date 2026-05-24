@@ -120,10 +120,23 @@
    - **Status**: ✅ Complete
 
 ### 🟡 Medium Priority
-- Test full user flow: Welcome → Profile → Generate → Dashboard → Counsel → Trading
-- Verify buy confirmation flow works end-to-end
-- Test portfolio generation with AI backend
-- Performance optimization for chart rendering
+
+1. **Counsel Page — Holdings Analysis Layout Refactor**
+   - Move `StockAnalysis` (Holdings Analysis · Peer Comparison) out of the full-width slot above the recommendations grid and into the right-side aside column, below the Scenarios and Sector Tape sections
+   - Make the section collapsible (collapsed by default to keep the page compact)
+   - Shrink the table: tighter row padding, smaller font, reduce to 1 peer per holding instead of 2 if needed
+   - **Files**: `frontend/screens-portfolio.jsx` (`Counsel`, `StockAnalysis`)
+
+2. **Agent — Live Date/Time Awareness**
+   - The AI agent currently has no awareness of the current date/time; its reasoning and recommendations may reference stale or assumed dates
+   - Inject the current date into the system prompt (or as a user-message prefix) so the agent reasons correctly about time horizons, earnings seasons, and market context
+   - Verify the agent uses today's date when generating portfolio rationale
+   - **Files**: `backend/agent/orchestrator.py`
+
+3. **General testing**
+   - Test full user flow: Welcome → Profile → Generate → Dashboard → Counsel → Trading
+   - Verify buy confirmation flow works end-to-end
+   - Performance optimization for chart rendering
 
 ## Known Issues & Limitations
 
