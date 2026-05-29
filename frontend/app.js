@@ -66,7 +66,7 @@ async function sendMessage() {
                     if (data.type === 'text') {
                         addMessageToChat(data.content, 'assistant');
                     } else if (data.type === 'portfolio') {
-                        showPortfolioModal(data.data);
+                        showPortfolioModal(data.portfolio);
                     }
                 }
             }

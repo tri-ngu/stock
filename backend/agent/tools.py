@@ -167,7 +167,8 @@ def optimize_portfolio(tickers: List[str], weights: List[float] = None) -> Dict[
             return -sharpe
 
         constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
-        bounds = [(0.02, 0.04) for _ in tickers]
+        n = len(tickers)
+        bounds = [(0.02, min(0.40, 1.0 - (n - 1) * 0.02)) for _ in tickers]
 
         result = minimize(
             portfolio_stats,
