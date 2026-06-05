@@ -82,21 +82,24 @@ function AIPrototype() {
       // Use AI's portfolio if available, enhance with real data
       let builtPortfolio;
       if (result.portfolio && result.portfolio.stocks && result.portfolio.stocks.length > 0) {
-        // Get real market data for the AI-selected stocks
+        // Pass the full AI portfolio so buildPortfolioWithRealData can use
+        // the MVO-optimized position weights instead of equal-weighting.
         builtPortfolio = await window.buildPortfolioWithRealData(
           profile.budget,
           profile.risk,
           profile.term,
-          result.portfolio.stocks
+          result.portfolio.stocks,
+          result.portfolio          // ← includes optimized positions dict
         );
       } else {
-        // Fallback: use real data with default tickers
-        const defaultTickers = ['VTI', 'VXUS', 'BND', 'AAPL', 'MSFT'];
+        // Fallback: use real data with default diversified tickers
+        const defaultTickers = ['VTI', 'VXUS', 'BND', 'AAPL', 'MSFT', 'JNJ', 'JPM', 'XOM', 'PG', 'QQQ'];
         builtPortfolio = await window.buildPortfolioWithRealData(
           profile.budget,
           profile.risk,
           profile.term,
-          defaultTickers
+          defaultTickers,
+          null
         );
       }
 

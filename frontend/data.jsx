@@ -14,169 +14,154 @@ async function fetchRealMarketData(tickers) {
   }
 }
 
-// Build portfolio using real market data
-async function buildPortfolioWithRealData(budget, risk, term, tickers) {
+// Build portfolio using real market data.
+// aiPortfolio — full backend portfolio object (includes optimized positions dict).
+async function buildPortfolioWithRealData(budget, risk, term, tickers, aiPortfolio) {
   try {
-    // Fetch real data for the tickers
     const marketData = await fetchRealMarketData(tickers);
-
-    if (Object.keys(marketData).length === 0) {
-      // Fallback to synthetic if real data unavailable
-      return buildPortfolio(budget, risk, term);
-    }
-
-    // Use real prices and metrics
-    const positions = [];
-    let totalWeight = 0;
-    const allocations = {};
-
-    // Calculate allocation weights based on risk
     const r = risk / 100;
-    const eqUS    = 0.20 + 0.40 * r;
-    const eqIntl  = 0.05 + 0.18 * r;
-    const em      = 0.02 + 0.08 * r;
-    const bonds   = 0.50 - 0.40 * r;
-    const real    = 0.05 + 0.03 * r;
-    const gold    = 0.04 + 0.02 * (1 - r);
-    const cash    = Math.max(0.03, 0.10 - 0.05 * r);
 
-    // Map tickers to their real data
+    // Backend-optimized dollar allocations (ticker → dollars).
+    // These come from the MVO optimizer and already enforce the risk-level split.
+    const aiPos = aiPortfolio?.positions || null;
+
+    // ── Build positions ──────────────────────────────────────────────────
+    const positions = [];
     for (const ticker of tickers) {
-      if (!marketData[ticker]) continue;
+      // Look up metadata — extended universe first, then 14-ticker base, then generic fallback
+      const meta = EXTENDED_TICKER_LOOKUP[ticker]
+        || HOLDINGS_UNIVERSE.find(h => h.ticker === ticker)
+        || { ticker, name: ticker, sector: 'US Equity', price: 100, day: 0 };
 
-      const data = marketData[ticker];
-      const holding = HOLDINGS_UNIVERSE.find(h => h.ticker === ticker);
-      if (!holding) continue;
+      // Prefer live market price from backend; fall back to static lookup price
+      const price = (marketData[ticker]?.current_price > 0)
+        ? marketData[ticker].current_price
+        : meta.price;
 
-      const weight = allocations[ticker] || (1 / tickers.length);
-      const dollars = weight * budget;
-      const shares = +(dollars / data.current_price).toFixed(4);
+      // Dollar allocation: backend-optimized first, then equal-weight fallback
+      const dollars = (aiPos && aiPos[ticker] != null)
+        ? Math.max(0, Number(aiPos[ticker]))
+        : budget / tickers.length;
+
+      if (dollars <= 0 || price <= 0) continue;
 
       positions.push({
-        ...holding,
-        price: data.current_price,
-        weight,
+        ticker,
+        name:   meta.name,
+        sector: meta.sector,
+        price,
+        weight:  dollars / budget,   // provisional — normalised below
         dollars,
-        shares,
+        shares:  +(dollars / price).toFixed(4),
+        day:     meta.day || 0,
       });
-
-      totalWeight += weight;
     }
 
-    // Calculate real metrics from market data
-    let avgReturn = 0;
-    let avgVol = 0;
-    for (const ticker of tickers) {
-      if (marketData[ticker]) {
-        avgReturn += marketData[ticker].avg_return / tickers.length;
-        avgVol += marketData[ticker].volatility / tickers.length;
+    if (positions.length === 0) return buildPortfolio(budget, risk, term);
+
+    // Normalise weights → exactly 100 %
+    const wSum = positions.reduce((s, p) => s + p.weight, 0);
+    if (wSum > 0 && Math.abs(wSum - 1) > 0.001) {
+      for (const p of positions) {
+        p.weight  /= wSum;
+        p.dollars  = p.weight * budget;
+        p.shares   = +(p.dollars / p.price).toFixed(4);
       }
     }
 
-    // Adjust metrics based on risk and diversification
-    const expReturn = Math.max(2, avgReturn * (0.5 + r)) + (4.2 - 4.2 * r * 0.3);
-    const vol = Math.max(3, avgVol * r);
-    const sharpe = +((expReturn - 2) / vol).toFixed(2);
-    const maxDD = -(vol * 1.5 + 5);
+    // Sort heaviest first for display
+    positions.sort((a, b) => b.weight - a.weight);
 
-    // Build historical series from real data
+    // ── Aggregate metrics from real market data ──────────────────────────
+    let avgReturn = 0, avgVol = 0, n = 0;
+    for (const t of tickers) {
+      if (marketData[t]) { avgReturn += marketData[t].avg_return; avgVol += marketData[t].volatility; n++; }
+    }
+    if (n > 0) { avgReturn /= n; avgVol /= n; }
+
+    const expReturn = n > 0
+      ? Math.max(2, avgReturn * (0.5 + r) + (4.2 - 4.2 * r * 0.3))
+      : 4.2 + 6.8 * r;
+    const vol = n > 0
+      ? Math.max(3, avgVol * (0.3 + 0.7 * r))
+      : 4.5 + 12 * r;
+    const sharpe = +((expReturn - 2) / Math.max(0.01, vol)).toFixed(2);
+    const maxDD  = -(vol * 1.5 + 5);
+
+    // ── Historical series (36 months from real data, or synthetic) ───────
     const yrs = term || 10;
     const series = [];
-    const dates = marketData[tickers[0]]?.dates || [];
+    const anchorTicker = tickers.find(t => marketData[t]?.dates?.length > 1);
 
-    if (dates.length > 0) {
-      const dayPrices = marketData[tickers[0]]?.prices || [];
-
-      // Aggregate daily prices to monthly (last close of each month), up to 36 months back
+    if (anchorTicker) {
+      const dates = marketData[anchorTicker].dates;
+      const prices = marketData[anchorTicker].prices;
       const monthMap = {};
-      for (let i = 0; i < dates.length; i++) {
-        const monthKey = dates[i].substring(0, 7); // "YYYY-MM"
-        monthMap[monthKey] = dayPrices[i];
-      }
-      const sortedMonths = Object.keys(monthMap).sort();
-      const recentMonths = sortedMonths.slice(-36);
-      const endPrice = monthMap[recentMonths[recentMonths.length - 1]] || 1;
-
-      for (const monthKey of recentMonths) {
-        const historicalPrice = monthMap[monthKey] || endPrice;
-        series.push({
-          time: monthKey + '-01',
-          value: +((historicalPrice / endPrice) * budget).toFixed(2)
-        });
+      for (let i = 0; i < dates.length; i++) monthMap[dates[i].substring(0, 7)] = prices[i];
+      const months = Object.keys(monthMap).sort().slice(-36);
+      const endP   = monthMap[months[months.length - 1]] || 1;
+      for (const mk of months) {
+        series.push({ time: mk + '-01', value: +((monthMap[mk] / endP) * budget).toFixed(2) });
       }
     }
 
-    // If no real series, use synthetic
     if (series.length === 0) {
       const seed = (risk * 9301 + 49297) % 233280;
-      const rng = (n) => ((seed * (n + 1) * 9301 + 49297) % 233280) / 233280;
+      const rng  = (i) => ((seed * (i + 1) * 9301 + 49297) % 233280) / 233280;
       let v = budget;
-      const ANCHOR = { y: 2026, m: 4 };
+      const A = { y: 2026, m: 4 };
       for (let i = 0; i < 60; i++) {
-        const monthlyMu = expReturn / 1200;
-        const monthlySigma = vol / Math.sqrt(12) / 100;
-        const shock = (rng(i) - 0.5) * 2 * monthlySigma * 2;
-        v = v * (1 + monthlyMu + shock);
-        const monthsBack = 59 - i;
-        let m = ANCHOR.m - monthsBack;
-        let y = ANCHOR.y;
-        while (m < 0) { m += 12; y--; }
+        v = v * (1 + expReturn / 1200 + (rng(i) - 0.5) * 2 * (vol / Math.sqrt(12) / 100) * 2);
+        const mb = 59 - i;
+        let m = A.m - mb, y = A.y;
+        while (m < 0)  { m += 12; y--; }
         while (m > 11) { m -= 12; y++; }
-        const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-01`;
-        series.push({ time: dateStr, value: +v.toFixed(2) });
+        series.push({ time: `${y}-${String(m + 1).padStart(2, '0')}-01`, value: +v.toFixed(2) });
       }
     }
 
-    // Daily series (30 days ending May 12, 2026)
+    // ── Daily 30-day series ──────────────────────────────────────────────
     const dailySeries = [];
-    const dailySeed = (risk * 1049 + 7919) % 233280;
-    const drng = (n) => ((dailySeed * (n + 1) * 9301 + 49297) % 233280) / 233280;
+    const ds = (risk * 1049 + 7919) % 233280;
+    const drng = (i) => ((ds * (i + 1) * 9301 + 49297) % 233280) / 233280;
     let dv = series[series.length - 1].value;
     const END = new Date(2026, 4, 12);
     for (let i = 29; i >= 0; i--) {
-      const date = new Date(END);
-      date.setDate(date.getDate() - i);
-      const dailyMu = expReturn / 36500;
-      const dailySigma = vol / Math.sqrt(252) / 100;
-      const shock = (drng(i) - 0.5) * 2 * dailySigma * 1.5;
-      dv = dv * (1 + dailyMu + shock);
-      const ds = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      dailySeries.push({ time: ds, value: +dv.toFixed(2) });
+      const d = new Date(END); d.setDate(d.getDate() - i);
+      dv = dv * (1 + expReturn / 36500 + (drng(i) - 0.5) * 2 * (vol / Math.sqrt(252) / 100) * 1.5);
+      dailySeries.push({
+        time:  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+        value: +dv.toFixed(2),
+      });
     }
 
-    // Projected trajectory (forward-looking)
+    // ── Projected forward series ─────────────────────────────────────────
     const projectedSeries = [];
-    const projSeed = (risk * 7919 + 1049) % 233280;
-    const prng = (n) => ((projSeed * (n + 1) * 9301 + 49297) % 233280) / 233280;
+    const ps = (risk * 7919 + 1049) % 233280;
+    const prng = (i) => ((ps * (i + 1) * 9301 + 49297) % 233280) / 233280;
     let pv = dv;
     const START = new Date(2026, 4, 12);
     for (let i = 0; i <= yrs * 12; i++) {
-      const date = new Date(START);
-      date.setMonth(date.getMonth() + i);
-      const monthlyMu = expReturn / 1200;
-      const monthlySigma = vol / Math.sqrt(12) / 100;
-      const shock = (prng(i) - 0.5) * 2 * monthlySigma * 2;
-      pv = pv * (1 + monthlyMu + shock);
-      const ps = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      projectedSeries.push({ time: ps, value: +pv.toFixed(2) });
+      const d = new Date(START); d.setMonth(d.getMonth() + i);
+      pv = pv * (1 + expReturn / 1200 + (prng(i) - 0.5) * 2 * (vol / Math.sqrt(12) / 100) * 2);
+      projectedSeries.push({
+        time:  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+        value: +pv.toFixed(2),
+      });
     }
 
-    // Projected metrics
-    const projLow  = budget * Math.pow(1 + (expReturn / 100) - vol / 100, yrs);
+    const projLow  = budget * Math.pow(1 + (expReturn - vol) / 100, yrs);
     const projMid  = budget * Math.pow(1 + expReturn / 100, yrs);
-    const projHigh = budget * Math.pow(1 + (expReturn / 100) + vol / 200, yrs);
+    const projHigh = budget * Math.pow(1 + (expReturn + vol / 2) / 100, yrs);
 
     return {
       budget, risk, term: yrs,
       positions,
       metrics: { expReturn, vol, sharpe, maxDD, projLow, projMid, projHigh },
-      series,
-      dailySeries,
-      projectedSeries,
+      series, dailySeries, projectedSeries,
     };
   } catch (error) {
     console.error('Error building portfolio with real data:', error);
-    // Fallback to synthetic
     return buildPortfolio(budget, risk, term);
   }
 }
@@ -197,6 +182,142 @@ const HOLDINGS_UNIVERSE = [
   { ticker: 'VNQ',  name: 'Vanguard Real Estate ETF',      sector: 'Real Estate',   price:  93.05, day: 0.32 },
   { ticker: 'SHV',  name: 'Short Treasury Bond ETF',       sector: 'Cash Eq.',      price: 110.21, day: 0.01 },
 ];
+
+// Comprehensive ticker lookup — covers every ticker the AI backend can return.
+// Used by buildPortfolioWithRealData so no AI-selected stock is ever silently dropped.
+const EXTENDED_TICKER_LOOKUP = {
+  // ── Existing base tickers (keep sector labels compatible with SECTOR_COLORS) ──
+  'VTI':  { name: 'Total US Market ETF',           sector: 'US Equity',    price: 274.51, day:  0.42 },
+  'VXUS': { name: 'Total Intl Stock ETF',           sector: 'Intl Equity',  price:  65.20, day:  0.18 },
+  'VWO':  { name: 'Emerging Markets ETF',           sector: 'Emerging Mkts',price:  46.83, day: -0.31 },
+  'BND':  { name: 'Total Bond Market ETF',          sector: 'Bonds',        price:  73.84, day:  0.06 },
+  'TLT':  { name: '20+ Yr Treasury Bond ETF',       sector: 'Bonds',        price:  93.12, day: -0.22 },
+  'GLD':  { name: 'SPDR Gold Shares',               sector: 'Commodities',  price: 218.40, day:  0.55 },
+  'VNQ':  { name: 'Vanguard Real Estate ETF',       sector: 'Real Estate',  price:  93.05, day:  0.32 },
+  'SHV':  { name: 'Short Treasury Bond ETF',        sector: 'Bonds',        price: 110.21, day:  0.01 },
+  // ── Technology ──────────────────────────────────────────────────────────────
+  'AAPL': { name: 'Apple Inc.',                     sector: 'Technology',   price: 226.74, day:  1.12 },
+  'MSFT': { name: 'Microsoft Corp.',                sector: 'Technology',   price: 438.21, day:  0.84 },
+  'NVDA': { name: 'NVIDIA Corp.',                   sector: 'Technology',   price: 142.17, day:  2.04 },
+  'GOOGL':{ name: 'Alphabet Inc.',                  sector: 'Technology',   price: 178.92, day:  0.66 },
+  'META': { name: 'Meta Platforms',                 sector: 'Technology',   price: 528.41, day:  1.32 },
+  'AMZN': { name: 'Amazon.com Inc.',                sector: 'Technology',   price: 192.30, day:  0.74 },
+  'AMD':  { name: 'Advanced Micro Devices',         sector: 'Technology',   price: 160.42, day:  1.84 },
+  'AVGO': { name: 'Broadcom Inc.',                  sector: 'Technology',   price: 198.50, day:  0.92 },
+  'ORCL': { name: 'Oracle Corp.',                   sector: 'Technology',   price: 143.12, day:  0.56 },
+  'CRM':  { name: 'Salesforce Inc.',                sector: 'Technology',   price: 263.44, day:  0.48 },
+  'ADBE': { name: 'Adobe Inc.',                     sector: 'Technology',   price: 377.21, day:  0.38 },
+  'NFLX': { name: 'Netflix Inc.',                   sector: 'Technology',   price: 648.10, day:  1.14 },
+  'QCOM': { name: 'Qualcomm Inc.',                  sector: 'Technology',   price: 151.84, day:  0.64 },
+  'TSLA': { name: 'Tesla, Inc.',                    sector: 'Technology',   price: 218.92, day: -1.24 },
+  'INTC': { name: 'Intel Corp.',                    sector: 'Technology',   price:  20.14, day: -0.42 },
+  'QQQ':  { name: 'Invesco QQQ Trust',              sector: 'Technology',   price: 481.22, day:  0.88 },
+  // ── Healthcare ──────────────────────────────────────────────────────────────
+  'JNJ':  { name: 'Johnson & Johnson',              sector: 'Healthcare',   price: 155.40, day: -0.18 },
+  'LLY':  { name: 'Eli Lilly & Co.',                sector: 'Healthcare',   price: 782.34, day:  1.24 },
+  'UNH':  { name: 'UnitedHealth Group',             sector: 'Healthcare',   price: 490.12, day: -0.84 },
+  'ABBV': { name: 'AbbVie Inc.',                    sector: 'Healthcare',   price: 186.42, day:  0.32 },
+  'TMO':  { name: 'Thermo Fisher Scientific',       sector: 'Healthcare',   price: 498.54, day:  0.44 },
+  'ABT':  { name: 'Abbott Laboratories',            sector: 'Healthcare',   price: 118.22, day:  0.28 },
+  'MDT':  { name: 'Medtronic plc',                  sector: 'Healthcare',   price:  84.62, day: -0.14 },
+  'AMGN': { name: 'Amgen Inc.',                     sector: 'Healthcare',   price: 306.18, day:  0.42 },
+  'GILD': { name: 'Gilead Sciences',                sector: 'Healthcare',   price:  86.34, day:  0.18 },
+  'REGN': { name: 'Regeneron Pharmaceuticals',      sector: 'Healthcare',   price: 558.22, day:  0.64 },
+  'VRTX': { name: 'Vertex Pharmaceuticals',         sector: 'Healthcare',   price: 468.14, day:  0.52 },
+  'BMY':  { name: 'Bristol-Myers Squibb',           sector: 'Healthcare',   price:  57.84, day: -0.28 },
+  'CI':   { name: 'The Cigna Group',                sector: 'Healthcare',   price: 340.22, day:  0.18 },
+  'HUM':  { name: 'Humana Inc.',                    sector: 'Healthcare',   price: 290.84, day: -1.12 },
+  'MRK':  { name: 'Merck & Co.',                    sector: 'Healthcare',   price:  88.42, day:  0.14 },
+  // ── Financials ──────────────────────────────────────────────────────────────
+  'BRK.B':{ name: 'Berkshire Hathaway',             sector: 'Financials',   price: 471.50, day:  0.21 },
+  'BLK':  { name: 'BlackRock Inc.',                 sector: 'Financials',   price: 892.44, day:  0.62 },
+  'GS':   { name: 'Goldman Sachs',                  sector: 'Financials',   price: 542.18, day:  0.84 },
+  'JPM':  { name: 'JPMorgan Chase',                 sector: 'Financials',   price: 218.10, day:  0.21 },
+  'MS':   { name: 'Morgan Stanley',                 sector: 'Financials',   price: 116.42, day:  0.38 },
+  'AXP':  { name: 'American Express',               sector: 'Financials',   price: 282.34, day:  0.44 },
+  'COF':  { name: 'Capital One Financial',          sector: 'Financials',   price: 172.84, day:  0.28 },
+  'PGR':  { name: 'Progressive Corp.',              sector: 'Financials',   price: 242.18, day:  0.56 },
+  'ICE':  { name: 'Intercontinental Exchange',      sector: 'Financials',   price: 148.42, day:  0.34 },
+  'CME':  { name: 'CME Group',                      sector: 'Financials',   price: 218.84, day:  0.22 },
+  'SPGI': { name: 'S&P Global Inc.',                sector: 'Financials',   price: 488.22, day:  0.48 },
+  'CB':   { name: 'Chubb Ltd.',                     sector: 'Financials',   price: 272.84, day:  0.14 },
+  'TRV':  { name: 'Travelers Companies',            sector: 'Financials',   price: 248.42, day:  0.24 },
+  'PRU':  { name: 'Prudential Financial',           sector: 'Financials',   price: 112.84, day:  0.18 },
+  'BAC':  { name: 'Bank of America',                sector: 'Financials',   price:  42.18, day:  0.28 },
+  'SCHW': { name: 'Charles Schwab',                 sector: 'Financials',   price:  72.84, day:  0.42 },
+  'V':    { name: 'Visa Inc.',                      sector: 'Financials',   price: 318.42, day:  0.54 },
+  'MA':   { name: 'Mastercard Inc.',                sector: 'Financials',   price: 488.18, day:  0.62 },
+  // ── Energy ──────────────────────────────────────────────────────────────────
+  'XOM':  { name: 'Exxon Mobil Corp.',              sector: 'Energy',       price: 108.42, day: -0.34 },
+  'CVX':  { name: 'Chevron Corp.',                  sector: 'Energy',       price: 148.84, day: -0.28 },
+  'COP':  { name: 'ConocoPhillips',                 sector: 'Energy',       price: 108.42, day: -0.42 },
+  'EOG':  { name: 'EOG Resources',                  sector: 'Energy',       price: 128.84, day: -0.38 },
+  'HES':  { name: 'Hess Corp.',                     sector: 'Energy',       price:  84.42, day: -0.54 },
+  'DVN':  { name: 'Devon Energy',                   sector: 'Energy',       price:  32.84, day: -0.64 },
+  'OXY':  { name: 'Occidental Petroleum',           sector: 'Energy',       price:  48.42, day: -0.42 },
+  'MPC':  { name: 'Marathon Petroleum',             sector: 'Energy',       price: 148.84, day: -0.28 },
+  'VLO':  { name: 'Valero Energy',                  sector: 'Energy',       price: 138.42, day: -0.34 },
+  'PSX':  { name: 'Phillips 66',                    sector: 'Energy',       price: 128.84, day: -0.28 },
+  'KMI':  { name: 'Kinder Morgan',                  sector: 'Energy',       price:  22.84, day:  0.14 },
+  'WMB':  { name: 'Williams Companies',             sector: 'Energy',       price:  42.42, day:  0.18 },
+  'SLB':  { name: 'SLB (Schlumberger)',             sector: 'Energy',       price:  44.84, day: -0.64 },
+  'HAL':  { name: 'Halliburton Co.',                sector: 'Energy',       price:  28.42, day: -0.48 },
+  'ET':   { name: 'Energy Transfer LP',             sector: 'Energy',       price:  16.84, day:  0.12 },
+  // ── Consumer ────────────────────────────────────────────────────────────────
+  'COST': { name: 'Costco Wholesale',               sector: 'Consumer',     price: 878.42, day:  0.42 },
+  'HD':   { name: 'Home Depot Inc.',                sector: 'Consumer',     price: 328.84, day:  0.28 },
+  'LOW':  { name: "Lowe's Companies",               sector: 'Consumer',     price: 248.42, day:  0.22 },
+  'TGT':  { name: 'Target Corp.',                   sector: 'Consumer',     price: 128.84, day: -0.42 },
+  'NKE':  { name: 'Nike Inc.',                      sector: 'Consumer',     price:  72.42, day: -0.34 },
+  'SBUX': { name: 'Starbucks Corp.',                sector: 'Consumer',     price:  82.84, day: -0.18 },
+  'YUM':  { name: 'Yum! Brands',                    sector: 'Consumer',     price: 128.42, day:  0.14 },
+  'DG':   { name: 'Dollar General',                 sector: 'Consumer',     price:  88.84, day: -0.28 },
+  'DLTR': { name: 'Dollar Tree Inc.',               sector: 'Consumer',     price:  72.42, day: -0.34 },
+  'MCD':  { name: "McDonald's Corp.",               sector: 'Consumer',     price: 298.84, day:  0.18 },
+  'PG':   { name: 'Procter & Gamble',               sector: 'Consumer',     price: 162.42, day:  0.12 },
+  'KO':   { name: 'Coca-Cola Co.',                  sector: 'Consumer',     price:  68.84, day:  0.08 },
+  'PEP':  { name: 'PepsiCo Inc.',                   sector: 'Consumer',     price: 158.42, day:  0.06 },
+  'CL':   { name: 'Colgate-Palmolive',              sector: 'Consumer',     price:  94.84, day:  0.14 },
+  'WMT':  { name: 'Walmart Inc.',                   sector: 'Consumer',     price:  92.42, day:  0.22 },
+  // ── Bonds / Fixed Income ────────────────────────────────────────────────────
+  'AGG':  { name: 'Core US Aggregate Bond ETF',     sector: 'Bonds',        price:  98.40, day:  0.04 },
+  'LQD':  { name: 'IG Corporate Bond ETF',          sector: 'Bonds',        price: 108.42, day:  0.08 },
+  'IEF':  { name: '7-10yr Treasury Bond ETF',       sector: 'Bonds',        price:  94.84, day: -0.12 },
+  'HYG':  { name: 'High Yield Corp Bond ETF',       sector: 'Bonds',        price:  78.42, day:  0.06 },
+  'TIP':  { name: 'TIPS Bond ETF',                  sector: 'Bonds',        price: 108.92, day:  0.10 },
+  'MUB':  { name: 'Municipal Bond ETF',             sector: 'Bonds',        price: 106.84, day:  0.04 },
+  'VCIT': { name: 'Intermed Corp Bond ETF',         sector: 'Bonds',        price:  78.84, day:  0.06 },
+  'VCSH': { name: 'Short-Term Corp Bond ETF',       sector: 'Bonds',        price:  76.42, day:  0.02 },
+  'BSV':  { name: 'Short-Term Bond ETF',            sector: 'Bonds',        price:  74.84, day:  0.02 },
+  // ── Real Estate ─────────────────────────────────────────────────────────────
+  'PLD':  { name: 'Prologis Inc.',                  sector: 'Real Estate',  price: 112.84, day:  0.42 },
+  'AMT':  { name: 'American Tower Corp.',           sector: 'Real Estate',  price: 188.42, day:  0.28 },
+  'EQIX': { name: 'Equinix Inc.',                   sector: 'Real Estate',  price: 802.84, day:  0.64 },
+  'CCI':  { name: 'Crown Castle Inc.',              sector: 'Real Estate',  price: 102.42, day: -0.34 },
+  'PSA':  { name: 'Public Storage',                 sector: 'Real Estate',  price: 288.84, day:  0.18 },
+  'O':    { name: 'Realty Income Corp.',            sector: 'Real Estate',  price:  52.42, day:  0.12 },
+  'AVB':  { name: 'AvalonBay Communities',          sector: 'Real Estate',  price: 192.84, day:  0.22 },
+  'EXR':  { name: 'Extra Space Storage',            sector: 'Real Estate',  price: 148.42, day:  0.16 },
+  'SPG':  { name: 'Simon Property Group',           sector: 'Real Estate',  price: 148.84, day:  0.24 },
+  // ── International ───────────────────────────────────────────────────────────
+  'EFA':  { name: 'MSCI EAFE ETF',                  sector: 'Intl Equity',  price:  82.42, day:  0.16 },
+  'IEFA': { name: 'Core MSCI EAFE ETF',             sector: 'Intl Equity',  price:  78.55, day:  0.12 },
+  'VEA':  { name: 'Developed Markets ETF',          sector: 'Intl Equity',  price:  48.84, day:  0.14 },
+  'EEM':  { name: 'iShares MSCI EM ETF',            sector: 'Emerging Mkts',price:  42.42, day: -0.28 },
+  'IEMG': { name: 'Core MSCI Emerging Mkts ETF',    sector: 'Emerging Mkts',price:  52.84, day: -0.18 },
+  'DGS':  { name: 'WisdomTree EM SmallCap Div',     sector: 'Emerging Mkts',price:  48.42, day: -0.34 },
+  'SPDW': { name: 'SPDR Portfolio Developed',       sector: 'Intl Equity',  price:  34.84, day:  0.12 },
+  'ACWX': { name: 'All Country World ex-US ETF',    sector: 'Intl Equity',  price:  54.42, day:  0.14 },
+  // ── Diversified ETFs ────────────────────────────────────────────────────────
+  'VOO':  { name: 'Vanguard S&P 500 ETF',           sector: 'US Equity',    price: 508.42, day:  0.44 },
+  'SPY':  { name: 'SPDR S&P 500 ETF',               sector: 'US Equity',    price: 568.84, day:  0.42 },
+  'IVV':  { name: 'iShares S&P 500 ETF',            sector: 'US Equity',    price: 568.42, day:  0.42 },
+  'SCHB': { name: 'Schwab US Broad Market ETF',     sector: 'US Equity',    price:  60.84, day:  0.44 },
+  'VIG':  { name: 'Dividend Appreciation ETF',      sector: 'US Equity',    price: 192.42, day:  0.28 },
+  'DGRO': { name: 'Dividend Growth ETF',            sector: 'US Equity',    price:  58.84, day:  0.24 },
+  'NOBL': { name: 'Dividend Aristocrats ETF',       sector: 'US Equity',    price:  96.42, day:  0.18 },
+  'DVY':  { name: 'Select Dividend ETF',            sector: 'US Equity',    price: 128.84, day:  0.14 },
+};
 
 // Build an allocation given budget + risk (0–100).
 function buildPortfolio(budget, risk, term) {
@@ -348,6 +469,7 @@ function buildPortfolio(budget, risk, term) {
 }
 
 const SECTOR_COLORS = {
+  // Base sectors (profile sketch + buildPortfolio fallback)
   'US Equity':     'oklch(0.52 0.10 145)',
   'Intl Equity':   'oklch(0.55 0.10 220)',
   'Emerging Mkts': 'oklch(0.58 0.13 60)',
@@ -355,6 +477,12 @@ const SECTOR_COLORS = {
   'Real Estate':   'oklch(0.55 0.10 30)',
   'Commodities':   'oklch(0.65 0.12 90)',
   'Cash Eq.':      'oklch(0.65 0.02 280)',
+  // AI-portfolio sectors
+  'Technology':    'oklch(0.48 0.14 268)',
+  'Healthcare':    'oklch(0.52 0.12 160)',
+  'Financials':    'oklch(0.58 0.10 45)',
+  'Energy':        'oklch(0.62 0.12 75)',
+  'Consumer':      'oklch(0.56 0.10 185)',
 };
 
 const RISK_LABELS = [
@@ -633,4 +761,4 @@ function getPeriodsForSeries(series) {
   return buttons;
 }
 
-Object.assign(window, { HOLDINGS_UNIVERSE, TRADABLE_UNIVERSE, buildPortfolio, buildPortfolioWithRealData, applyOrdersToPortfolio, SECTOR_COLORS, RISK_LABELS, riskLabelFor, GOALS, MARKET_HEADLINES, AGENT_STEPS, FUTURE_ACTIONS, ACTION_CATEGORIES, WEEKLY_ACTIVITY, getPeriodsForTerm, getPeriodsForSeries, TICKER_METRICS, SECTOR_ALT_POOL, getTickerMetrics, generateSwitchSuggestions });
+Object.assign(window, { HOLDINGS_UNIVERSE, EXTENDED_TICKER_LOOKUP, TRADABLE_UNIVERSE, buildPortfolio, buildPortfolioWithRealData, applyOrdersToPortfolio, SECTOR_COLORS, RISK_LABELS, riskLabelFor, GOALS, MARKET_HEADLINES, AGENT_STEPS, FUTURE_ACTIONS, ACTION_CATEGORIES, WEEKLY_ACTIVITY, getPeriodsForTerm, getPeriodsForSeries, TICKER_METRICS, SECTOR_ALT_POOL, getTickerMetrics, generateSwitchSuggestions });

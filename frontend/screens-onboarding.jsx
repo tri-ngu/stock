@@ -426,28 +426,36 @@ function ProfileScreen({ copy, profile, setProfile, riskStyle, density, onContin
 
           <Rule style={{ margin: '24px 0 18px' }} />
 
-          <Eyebrow style={{ marginBottom: 10 }}>Allocation sketch</Eyebrow>
+          <Eyebrow style={{ marginBottom: 10 }}>Indicative allocation</Eyebrow>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {[
-              { k: 'US Equity', v: 20 + 40 * risk / 100 },
-              { k: 'Intl Equity', v: 5 + 18 * risk / 100 },
-              { k: 'Bonds', v: 50 - 40 * risk / 100 },
-              { k: 'Real Estate', v: 5 + 3 * risk / 100 },
-              { k: 'Commodities', v: 4 + 2 * (1 - risk / 100) },
-            ].map((s, i) => {
-              const pct = Math.max(0, s.v);
-              return (
-                <div key={i}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 2 }}>
-                    <span style={{ color: 'var(--ink-soft)' }}>{s.k}</span>
-                    <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-mute)' }}>{pct.toFixed(0)}%</span>
+            {(() => {
+              const r = risk / 100;
+              const raw = [
+                { k: 'Technology',  v: 10 + 30 * r },
+                { k: 'Healthcare',  v: 15 - 5  * r },
+                { k: 'Financials',  v: 14 - 2  * r },
+                { k: 'Consumer',    v: 10 - 3  * r },
+                { k: 'Bonds',       v: 50 - 38 * r },
+              ].map(s => ({ ...s, v: Math.max(2, s.v) }));
+              const total = raw.reduce((s, a) => s + a.v, 0);
+              return raw.map((s, i) => {
+                const pct = (s.v / total) * 100;
+                return (
+                  <div key={i}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 2 }}>
+                      <span style={{ color: 'var(--ink-soft)' }}>{s.k}</span>
+                      <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink-mute)' }}>{pct.toFixed(0)}%</span>
+                    </div>
+                    <div style={{ height: 3, background: 'var(--rule)' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: SECTOR_COLORS[s.k] || 'var(--ink)', transition: 'width 0.25s' }} />
+                    </div>
                   </div>
-                  <div style={{ height: 3, background: 'var(--rule)' }}>
-                    <div style={{ height: '100%', width: `${pct}%`, background: SECTOR_COLORS[s.k] || 'var(--ink)', transition: 'width 0.25s' }} />
-                  </div>
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 10, color: 'var(--ink-mute)' }}>
+            Exact sector mix determined by AI based on your goals.
           </div>
         </aside>
       </div>

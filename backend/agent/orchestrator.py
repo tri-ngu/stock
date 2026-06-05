@@ -6,8 +6,6 @@ from groq import Groq
 from .tools import (
     get_stock_info,
     screen_stocks,
-    get_historical_data,
-    optimize_portfolio,
     build_portfolio_recommendation,
     analyze_company,
     get_sector_comparison,
@@ -70,46 +68,6 @@ TOOLS = [
                     }
                 },
                 "required": ["criteria"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_historical_data",
-            "description": "Fetch historical price data and calculate returns and volatility",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Stock ticker symbol"
-                    },
-                    "period": {
-                        "type": "string",
-                        "description": "Time period (e.g., '5y', '1y', '6mo')",
-                        "default": "5y"
-                    }
-                },
-                "required": ["ticker"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "optimize_portfolio",
-            "description": "Optimize portfolio allocation using Mean-Variance optimization to maximize Sharpe ratio",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "tickers": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of stock tickers to include in portfolio"
-                    }
-                },
-                "required": ["tickers"]
             }
         }
     },
@@ -188,36 +146,41 @@ TOOLS = [
 class StockAdvisorOrchestrator:
     def __init__(self):
         self.client = Groq()
-        self.system_prompt = """You are a diversified portfolio advisor. Build portfolios that vary meaningfully based on each user's risk level and goals.
+        self.system_prompt = """You are a diversified portfolio advisor. Every portfolio must contain AT LEAST 10 individual stocks drawn from multiple sectors.
 
-MANDATORY WORKFLOW — follow this exact sequence every time:
+MANDATORY WORKFLOW — follow this EXACT sequence every time a user asks for a portfolio:
 
-STEP 1 — Screen primary equity sector (choose based on goals + risk):
-  - Wealth building / aggressive → sector: "tech" or "finance"
-  - Retirement / income → sector: "consumer" or "healthcare", dividend_yield: "high"
-  - Conservative / capital preservation → sector: "consumer" or "healthcare"
-  - Balanced / moderate → sector: "finance" or "healthcare"
+STEP 1 — Screen primary equity sector (pick based on goals + risk):
+  - Wealth building / aggressive → "tech" or "finance"
+  - Retirement / income → "consumer" or "healthcare" with dividend_yield: "high"
+  - Conservative → "consumer" or "healthcare"
+  - Balanced / moderate → "finance" or "healthcare"
 
-STEP 2 — Screen bonds (ALWAYS required for diversification):
-  screen_stocks with sector: "bonds"
-  (Skip only if user explicitly asks for 100% equities)
+STEP 2 — Screen bonds (ALWAYS required):
+  Call screen_stocks with sector: "bonds"
 
-STEP 3 — Screen a SECOND equity sector different from Step 1:
-  Pick a sector NOT already used. Examples:
-  - If Step 1 was "tech" → use "healthcare" or "consumer"
-  - If Step 1 was "finance" → use "energy" or "tech"
-  - If Step 1 was "consumer" → use "finance" or "real_estate"
+STEP 3 — Screen a SECOND equity sector, DIFFERENT from Step 1:
+  Examples: Step1=tech → use "healthcare" or "energy"
+            Step1=finance → use "tech" or "consumer"
+            Step1=consumer → use "finance" or "real_estate"
 
-STEP 4 — Build the portfolio:
-  Call build_portfolio_recommendation with stocks from ALL three screen calls combined.
+STEP 4 — Screen a THIRD sector, DIFFERENT from Steps 1 and 3:
+  Examples: Steps1+3=tech+healthcare → use "consumer" or "energy"
+            Steps1+3=finance+tech → use "healthcare" or "consumer"
+
+STEP 5 — Build the portfolio:
+  Call build_portfolio_recommendation with:
+    stocks = [EVERY ticker returned from Steps 1 + 2 + 3 + 4 combined into one list]
+  You MUST concatenate all returned "stocks" arrays. Do not pass stocks from only one call.
   Include user_goals and time_horizon.
 
-DIVERSIFICATION RULES:
-- Never use the same sector twice
+CRITICAL RULES:
+- You MUST call screen_stocks at least 4 times (Steps 1–4) before calling build_portfolio_recommendation
+- Each screen_stocks call MUST use a different sector
+- The "stocks" argument to build_portfolio_recommendation MUST be the union of all tickers from all 4 screen_stocks calls
+- The final portfolio must have at least 10 positions
 - Always include at least one bond/fixed-income position
-- Conservative (risk < 35): 50%+ bonds, equity from consumer/healthcare
-- Moderate (risk 35–65): 25–35% bonds, equity from 2 different sectors
-- Aggressive (risk > 65): 10–15% bonds, equity growth from tech + one other sector
+- Conservative: 50%+ bonds; Moderate: 25–35% bonds; Aggressive: 10–15% bonds
 
 Keep explanations brief and beginner-friendly. Never guarantee returns."""
 
@@ -281,13 +244,6 @@ Keep explanations brief and beginner-friendly. Never guarantee returns."""
             elif tool_name == "screen_stocks":
                 result = screen_stocks(tool_input.get("criteria", {}))
                 return result
-            elif tool_name == "get_historical_data":
-                return get_historical_data(
-                    tool_input["ticker"],
-                    tool_input.get("period", "5y")
-                )
-            elif tool_name == "optimize_portfolio":
-                return optimize_portfolio(tool_input["tickers"])
             elif tool_name == "build_portfolio_recommendation":
                 # Support both old signature (for backward compat) and new signature
                 return build_portfolio_recommendation(

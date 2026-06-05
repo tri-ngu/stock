@@ -1,11 +1,38 @@
 import random
 import yfinance as yf
 import numpy as np
-from datetime import datetime, timedelta
 from typing import Dict, List, Any
+from collections import defaultdict
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Risk tier sets — used by compute_portfolio_weights
+_GROWTH_TICKERS = frozenset([
+    'NVDA', 'AMD', 'META', 'TSLA', 'NFLX', 'AMZN', 'GOOGL', 'AAPL', 'MSFT',
+    'AVGO', 'CRM', 'ADBE', 'ORCL', 'QCOM', 'INTC', 'QQQ',
+])
+_BOND_ETFS = frozenset([
+    'BND', 'AGG', 'LQD', 'TLT', 'IEF', 'SHV', 'HYG', 'TIP',
+    'MUB', 'VCIT', 'VCSH', 'BSV',
+])
+_DIVERSIFIED_ETFS = frozenset([
+    'VTI', 'VOO', 'SPY', 'IVV', 'SCHB', 'VIG', 'DGRO', 'NOBL', 'DVY',
+])
+
+# Sector map — used for round-robin diversity selection in build_portfolio_recommendation
+_TICKER_SECTOR = {
+    **{t: 'tech'         for t in ['NVDA','META','GOOGL','AMZN','AMD','AVGO','ORCL','CRM','ADBE','NFLX','QCOM','TSLA','INTC','MSFT','AAPL']},
+    **{t: 'healthcare'   for t in ['LLY','UNH','ABBV','TMO','ABT','MDT','AMGN','GILD','REGN','VRTX','BMY','CI','HUM','JNJ','MRK']},
+    **{t: 'finance'      for t in ['BLK','GS','JPM','MS','AXP','COF','PGR','ICE','CME','SPGI','CB','TRV','PRU','BAC','SCHW','V','MA']},
+    **{t: 'energy'       for t in ['EOG','COP','HES','DVN','OXY','MPC','VLO','PSX','KMI','WMB','SLB','HAL','XOM','CVX','ET']},
+    **{t: 'consumer'     for t in ['COST','HD','LOW','TGT','NKE','SBUX','YUM','DG','DLTR','MCD','PG','KO','PEP','CL','WMT']},
+    **{t: 'bonds'        for t in ['BND','AGG','LQD','TLT','IEF','SHV','HYG','TIP','MUB','VCIT','VCSH','BSV']},
+    **{t: 'real_estate'  for t in ['PLD','AMT','EQIX','CCI','PSA','VNQ','O','AVB','EXR','SPG']},
+    **{t: 'international'for t in ['VXUS','EFA','VWO','IEFA','VEA','EEM','IEMG','DGS','SPDW','ACWX']},
+    **{t: 'diversified'  for t in ['VTI','VOO','SPY','IVV','SCHB','VIG','DGRO','NOBL','DVY','QQQ']},
+}
+
 
 def get_stock_info(ticker: str) -> Dict[str, Any]:
     """Fetch current stock information for a given ticker."""
@@ -39,19 +66,19 @@ def get_stock_info(ticker: str) -> Dict[str, Any]:
         logger.error(f"Error fetching stock info for {ticker}: {e}")
         return {"error": str(e), "ticker": ticker}
 
+
 def screen_stocks(criteria: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Screen stocks based on AI-provided criteria.
+    Screen stocks based on AI-provided criteria. No external API calls.
 
     criteria: {
-      'sector': 'tech' | 'healthcare' | 'finance' | 'energy' | 'consumer' | 'diversified',
+      'sector': 'tech' | 'healthcare' | 'finance' | 'energy' | 'consumer' | 'bonds'
+               | 'real_estate' | 'international' | 'diversified',
       'market_cap': 'large' | 'mid' | 'small',
       'dividend_yield': 'high' | 'moderate' | 'growth',
-      'user_goals': ['retire', 'wealth', 'income', 'house', 'edu'] (list)
+      'user_goals': ['retire', 'wealth', 'income', 'house', 'edu']
     }
     """
-
-    # Expanded universe — 12-15 candidates per sector for variety
     stock_universe = {
         'tech':          ['NVDA', 'META', 'GOOGL', 'AMZN', 'AMD', 'AVGO', 'ORCL', 'CRM', 'ADBE', 'NFLX', 'QCOM', 'TSLA', 'INTC', 'MSFT', 'AAPL'],
         'healthcare':    ['LLY', 'UNH', 'ABBV', 'TMO', 'ABT', 'MDT', 'AMGN', 'GILD', 'REGN', 'VRTX', 'BMY', 'CI', 'HUM', 'JNJ', 'MRK'],
@@ -64,142 +91,72 @@ def screen_stocks(criteria: Dict[str, Any]) -> Dict[str, Any]:
         'diversified':   ['VTI', 'VOO', 'SPY', 'IVV', 'SCHB', 'VIG', 'DGRO', 'NOBL', 'DVY', 'QQQ'],
     }
 
+    # Curated high-dividend sublists — no yfinance call needed for income/retire filtering
+    high_dividend_universe = {
+        'tech':          ['AAPL', 'MSFT', 'INTC', 'QCOM', 'AVGO'],
+        'healthcare':    ['JNJ', 'ABT', 'MDT', 'ABBV', 'BMY', 'AMGN', 'GILD'],
+        'finance':       ['JPM', 'BAC', 'PRU', 'TRV', 'CB', 'MS', 'AXP'],
+        'energy':        ['XOM', 'CVX', 'COP', 'KMI', 'WMB', 'ET', 'OXY'],
+        'consumer':      ['KO', 'PEP', 'PG', 'WMT', 'MCD', 'CL', 'YUM'],
+        'bonds':         ['BND', 'AGG', 'LQD', 'TLT', 'IEF', 'HYG', 'TIP'],
+        'real_estate':   ['O', 'VNQ', 'AVB', 'PSA', 'SPG', 'EXR', 'AMT'],
+        'international': ['DGS', 'SPDW', 'IEFA', 'EFA', 'ACWX'],
+        'diversified':   ['VIG', 'DGRO', 'NOBL', 'DVY', 'SCHB'],
+    }
+
     sector = criteria.get('sector', 'diversified').lower()
     dividend_pref = criteria.get('dividend_yield', 'moderate').lower()
     user_goals = criteria.get('user_goals', [])
 
-    # Shuffle so each call surfaces different stocks from the same sector
-    candidates = list(stock_universe.get(sector, stock_universe['diversified']))
+    need_dividend_filter = ('income' in user_goals or 'retire' in user_goals) and dividend_pref == 'high'
+
+    if need_dividend_filter:
+        candidates = list(high_dividend_universe.get(sector, high_dividend_universe['diversified']))
+    else:
+        candidates = list(stock_universe.get(sector, stock_universe['diversified']))
+
     random.shuffle(candidates)
+    result_stocks = candidates[:10]
 
-    screened = []
-    for ticker in candidates:
-        try:
-            info = get_stock_info(ticker)
-            if "error" in info:
-                continue
-
-            # Income / retirement: require meaningful dividend yield
-            if ('income' in user_goals or 'retire' in user_goals) and dividend_pref == 'high':
-                div_yield = info.get('dividendYield', 0) or 0
-                if div_yield < 0.015:
-                    continue
-
-            screened.append(ticker)
-        except Exception as e:
-            logger.error(f"Error screening {ticker}: {e}")
-            continue
-
-    # Fall back to unfiltered shuffle slice if filter removed too many
-    if len(screened) < 3:
-        screened = candidates[:5]
-
-    result_stocks = screened[:5]
     reasoning = f"Screened {sector.title()} sector — selected {len(result_stocks)} securities for goals: {', '.join(user_goals) if user_goals else 'balanced growth'}"
 
     return {
         'stocks': result_stocks,
         'sector': sector,
         'reasoning': reasoning,
-        'count': len(result_stocks)
+        'count': len(result_stocks),
     }
 
-def get_historical_data(ticker: str, period: str = "5y") -> Dict[str, Any]:
-    """Fetch historical price data for a ticker."""
-    try:
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period=period)
 
-        if len(hist) == 0:
-            return {"error": f"No data found for {ticker}"}
+def compute_portfolio_weights(tickers: List[str], risk_level: str) -> Dict[str, float]:
+    """
+    Assign portfolio weights using risk-tier multipliers. No external API calls.
 
-        returns = hist["Close"].pct_change().dropna()
+    Tickers are classified into growth / stable / income / diversified tiers.
+    Multipliers amplify or dampen each tier based on the user's risk level,
+    producing differentiated weights before the bond/equity split is applied.
+    """
+    MULTIPLIERS = {
+        'conservative': {'growth': 0.6, 'stable': 1.1, 'income': 1.5, 'diversified': 1.2},
+        'moderate':     {'growth': 1.0, 'stable': 1.0, 'income': 1.0, 'diversified': 1.0},
+        'aggressive':   {'growth': 1.6, 'stable': 0.8, 'income': 0.4, 'diversified': 0.9},
+    }
+    mults = MULTIPLIERS.get(risk_level.lower(), MULTIPLIERS['moderate'])
 
-        return {
-            "ticker": ticker,
-            "data_points": len(hist),
-            "start_date": hist.index[0].strftime("%Y-%m-%d"),
-            "end_date": hist.index[-1].strftime("%Y-%m-%d"),
-            "avg_return": float(returns.mean() * 252),
-            "volatility": float(returns.std() * np.sqrt(252)),
-        }
-    except Exception as e:
-        logger.error(f"Error fetching historical data for {ticker}: {e}")
-        return {"error": str(e)}
-
-def optimize_portfolio(tickers: List[str], weights: List[float] = None) -> Dict[str, Any]:
-    """Optimize portfolio using Mean-Variance optimization."""
-    try:
-        from scipy.optimize import minimize
-
-        if not tickers or len(tickers) == 0:
-            return {"error": "No tickers provided"}
-
-        # Fetch 5-year historical data
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=5*365)
-
-        data = yf.download(" ".join(tickers), start=start_date, end=end_date, progress=False)
-
-        if len(data) == 0:
-            return {"error": "Failed to fetch price data"}
-
-        # Handle single vs multiple tickers
-        if len(tickers) == 1:
-            closes = data["Adj Close"]
+    raw = {}
+    for ticker in tickers:
+        if ticker in _BOND_ETFS:
+            raw[ticker] = mults['income']
+        elif ticker in _GROWTH_TICKERS:
+            raw[ticker] = mults['growth']
+        elif ticker in _DIVERSIFIED_ETFS:
+            raw[ticker] = mults['diversified']
         else:
-            closes = data["Close"]
+            raw[ticker] = mults['stable']
 
-        # Calculate returns
-        returns = closes.pct_change().dropna()
+    total = sum(raw.values()) or 1
+    return {t: w / total for t, w in raw.items()}
 
-        if len(returns) == 0:
-            return {"error": "Insufficient data for optimization"}
-
-        mean_returns = returns.mean() * 252
-        cov_matrix = returns.cov() * 252
-
-        # Optimization function
-        def portfolio_stats(weights):
-            port_return = np.sum(weights * mean_returns)
-            port_std = np.sqrt(np.dot(weights, np.dot(cov_matrix, weights)))
-            sharpe = port_return / port_std if port_std > 0 else 0
-            return -sharpe
-
-        constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
-        n = len(tickers)
-        bounds = [(0.02, min(0.40, 1.0 - (n - 1) * 0.02)) for _ in tickers]
-
-        result = minimize(
-            portfolio_stats,
-            x0=np.array([1/len(tickers)] * len(tickers)),
-            method="SLSQP",
-            bounds=bounds,
-            constraints=constraints,
-        )
-
-        if not result.success:
-            # Fallback to equal weight
-            opt_weights = np.array([1/len(tickers)] * len(tickers))
-        else:
-            opt_weights = result.x
-
-        port_return = np.sum(opt_weights * mean_returns)
-        port_std = np.sqrt(np.dot(opt_weights, np.dot(cov_matrix, opt_weights)))
-        sharpe = port_return / port_std if port_std > 0 else 0
-
-        return {
-            "tickers": tickers,
-            "weights": {tickers[i]: float(opt_weights[i]) for i in range(len(tickers))},
-            "expected_return": float(port_return),
-            "volatility": float(port_std),
-            "sharpe_ratio": float(sharpe),
-        }
-    except Exception as e:
-        logger.error(f"Error optimizing portfolio: {e}")
-        # Fallback to equal weight
-        weights = {ticker: 1/len(tickers) for ticker in tickers}
-        return {"tickers": tickers, "weights": weights, "error": str(e)}
 
 def build_portfolio_recommendation(
     budget: float,
@@ -214,65 +171,106 @@ def build_portfolio_recommendation(
     Args:
         budget: Investment amount
         risk_level: 'conservative', 'moderate', 'aggressive'
-        stocks: AI-selected tickers from stock_screener
+        stocks: AI-selected tickers from screen_stocks
         user_goals: User's investment goals ['retire', 'wealth', 'income', 'house', 'edu']
         time_horizon: Years to invest
     """
     try:
         budget = float(budget)
 
-        # If no stocks provided by AI, use default diversified basket
+        FALLBACK_BASKET = [
+            'VTI', 'QQQ', 'BND', 'AAPL', 'MSFT', 'JNJ', 'JPM', 'XOM',
+            'PG', 'UNH', 'NVDA', 'GOOGL', 'META', 'AMZN', 'LLY',
+            'V', 'MA', 'COST', 'HD', 'AVGO',
+        ]
+
         if not stocks or len(stocks) == 0:
-            stocks = ['VTI', 'VOO', 'VTSAX']
+            stocks = list(FALLBACK_BASKET)
 
-        # Asset allocation by risk level
+        # Deduplicate while preserving order
+        seen = set()
+        unique_stocks = []
+        for t in stocks:
+            if t not in seen:
+                seen.add(t)
+                unique_stocks.append(t)
+        stocks = unique_stocks
+
+        # Pad to at least 10 stocks
+        if len(stocks) < 10:
+            for ticker in FALLBACK_BASKET:
+                if ticker not in seen:
+                    stocks.append(ticker)
+                    seen.add(ticker)
+                if len(stocks) >= 10:
+                    break
+
+        # Asset allocation targets by risk level
         allocations = {
-            "conservative": {
-                "bonds": 0.50,
-                "dividend_stocks": 0.30,
-                "growth_stocks": 0.20,
-            },
-            "moderate": {
-                "bonds": 0.30,
-                "dividend_stocks": 0.35,
-                "growth_stocks": 0.35,
-            },
-            "aggressive": {
-                "bonds": 0.10,
-                "dividend_stocks": 0.30,
-                "growth_stocks": 0.60,
-            },
+            "conservative": {"bonds": 0.50, "dividend_stocks": 0.30, "growth_stocks": 0.20},
+            "moderate":     {"bonds": 0.30, "dividend_stocks": 0.35, "growth_stocks": 0.35},
+            "aggressive":   {"bonds": 0.10, "dividend_stocks": 0.30, "growth_stocks": 0.60},
         }
-
         allocation = allocations.get(risk_level.lower(), allocations["moderate"])
 
-        # Incorporate user goals into allocation
-        # If income goal, increase dividend weight
         if user_goals and 'income' in user_goals:
             allocation['dividend_stocks'] += 0.15
             allocation['growth_stocks'] -= 0.15
 
-        # If retirement, emphasize bonds for longer horizons
         if user_goals and 'retire' in user_goals and time_horizon > 20:
             allocation['bonds'] += 0.10
             allocation['growth_stocks'] -= 0.10
 
-        # Normalize to sum to 1
         total = sum(allocation.values())
         allocation = {k: v / total for k, v in allocation.items()}
 
-        # Use AI-selected stocks for optimization (up to 8 for diversity)
-        portfolio_tickers = stocks[:8] if len(stocks) >= 8 else stocks
+        # Round-robin sector selection so no single sector dominates the first 15.
+        # Group tickers by sector, then alternate 1-from-each until we have 15.
+        sector_buckets = defaultdict(list)
+        for t in stocks:
+            sector_buckets[_TICKER_SECTOR.get(t, 'other')].append(t)
 
-        # Optimize portfolio on AI-selected stocks
-        optimized = optimize_portfolio(portfolio_tickers)
+        active = [list(v) for v in sector_buckets.values()]
+        selected = []
+        while len(selected) < 15 and active:
+            next_active = []
+            for bucket in active:
+                if len(selected) >= 15:
+                    break
+                if bucket:
+                    selected.append(bucket.pop(0))
+                if bucket:
+                    next_active.append(bucket)
+            active = next_active
 
-        if "error" in optimized and len(portfolio_tickers) > 1:
-            weights = {ticker: 1/len(portfolio_tickers) for ticker in portfolio_tickers}
-        else:
-            weights = optimized.get("weights", {})
+        portfolio_tickers = selected
 
-        # Calculate dollar amounts
+        # Rule-based weights — no external API calls
+        weights = compute_portfolio_weights(portfolio_tickers, risk_level)
+
+        # Enforce risk-level bond/equity split
+        bond_tix   = [t for t in portfolio_tickers if t in _BOND_ETFS]
+        equity_tix = [t for t in portfolio_tickers if t not in _BOND_ETFS]
+        bond_target   = allocation['bonds']
+        equity_target = 1.0 - bond_target
+
+        if bond_tix and equity_tix:
+            bond_raw   = sum(weights.get(t, 0) for t in bond_tix)   or 1
+            equity_raw = sum(weights.get(t, 0) for t in equity_tix) or 1
+            for t in bond_tix:
+                weights[t] = (weights.get(t, 0) / bond_raw)   * bond_target
+            for t in equity_tix:
+                weights[t] = (weights.get(t, 0) / equity_raw) * equity_target
+        elif not bond_tix:
+            raw = sum(weights.get(t, 0) for t in equity_tix) or 1
+            for t in equity_tix:
+                weights[t] = weights.get(t, 0) / raw
+
+        # Guarantee weights sum exactly to 1.0
+        w_total = sum(weights.get(t, 0) for t in portfolio_tickers) or 1
+        for t in portfolio_tickers:
+            weights[t] = weights.get(t, 0) / w_total
+
         positions = {ticker: budget * weights[ticker] for ticker in portfolio_tickers}
 
         reasoning = f"Built portfolio from {len(portfolio_tickers)} AI-selected stocks for {risk_level} risk, goals: {', '.join(user_goals or ['balanced'])}"
@@ -282,15 +280,16 @@ def build_portfolio_recommendation(
             "risk_level": risk_level,
             "positions": positions,
             "stocks": portfolio_tickers,
-            "expected_return": optimized.get("expected_return", 0),
-            "volatility": optimized.get("volatility", 0),
-            "sharpe_ratio": optimized.get("sharpe_ratio", 0),
+            "expected_return": 0,
+            "volatility": 0,
+            "sharpe_ratio": 0,
             "reasoning": reasoning,
-            "goals": user_goals or []
+            "goals": user_goals or [],
         }
     except Exception as e:
         logger.error(f"Error building portfolio recommendation: {e}")
         return {"error": str(e), "budget": budget}
+
 
 def analyze_company(ticker: str) -> Dict[str, Any]:
     """Analyze a company's financial metrics and outlook."""
@@ -315,21 +314,17 @@ def analyze_company(ticker: str) -> Dict[str, Any]:
         logger.error(f"Error analyzing company {ticker}: {e}")
         return {"error": str(e), "ticker": ticker}
 
+
 def get_sector_comparison(sector: str) -> Dict[str, Any]:
     """Compare stocks within a sector."""
     sector_stocks = {
         "Technology": ["AAPL", "MSFT", "NVDA", "GOOGL"],
-        "Finance": ["JPM", "BAC", "WFC", "GS"],
+        "Finance":    ["JPM", "BAC", "WFC", "GS"],
         "Healthcare": ["JNJ", "UNH", "PFE", "MRK"],
-        "Energy": ["XOM", "CVX", "COP", "EOG"],
-        "Consumer": ["AMZN", "WMT", "HD", "MCD"],
+        "Energy":     ["XOM", "CVX", "COP", "EOG"],
+        "Consumer":   ["AMZN", "WMT", "HD", "MCD"],
     }
 
     tickers = sector_stocks.get(sector, [])
-    stocks = []
-
-    for ticker in tickers:
-        info = get_stock_info(ticker)
-        stocks.append(info)
-
+    stocks = [get_stock_info(t) for t in tickers]
     return {"sector": sector, "stocks": stocks}
