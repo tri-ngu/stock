@@ -287,14 +287,18 @@ function InteractiveChart({ series, dailySeries, chartPeriod, accent, viewMode =
       seriesRef.current.setData(formattedData);
       chartRef.current.timeScale().fitContent();
 
-      const periodDays = { '3M': 91, '6M': 182, '1Y': 365, '3Y': 1095, '5Y': 1825 };
+      const parsedDays = (() => {
+        const m = chartPeriod.match(/^(\d+(?:\.\d+)?)([MY])$/);
+        if (!m) return null;
+        return m[2] === 'Y' ? Math.round(parseFloat(m[1]) * 365) : Math.round(parseFloat(m[1]) * 30.44);
+      })();
 
-      if (chartPeriod in periodDays && data.length > 1) {
+      if (parsedDays !== null && data.length > 1) {
         if (viewMode === 'projection') {
           const from = data[0].time;
           const fromDate = new Date(from + 'T00:00:00Z');
           const toDate = new Date(fromDate);
-          toDate.setDate(toDate.getDate() + periodDays[chartPeriod]);
+          toDate.setDate(toDate.getDate() + parsedDays);
 
           const toStr = toDate.getFullYear() + '-' +
                         String(toDate.getMonth() + 1).padStart(2, '0') + '-' +
@@ -308,7 +312,7 @@ function InteractiveChart({ series, dailySeries, chartPeriod, accent, viewMode =
           const to = data[data.length - 1].time;
           const toDate = new Date(to + 'T00:00:00Z');
           const fromDate = new Date(toDate);
-          fromDate.setDate(fromDate.getDate() - periodDays[chartPeriod]);
+          fromDate.setDate(fromDate.getDate() - parsedDays);
 
           const fromStr = fromDate.getFullYear() + '-' +
                           String(fromDate.getMonth() + 1).padStart(2, '0') + '-' +

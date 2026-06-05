@@ -641,24 +641,119 @@ function applyOrdersToPortfolio(portfolio, orders) {
 
 // ── Per-ticker synthetic metrics for analysis & peer comparison ───────────────
 const TICKER_METRICS = {
+  // Diversified / ETFs
   'VTI':   { pe: 22.4, divYield: 1.32, ret52w: 19.8, proj12m: 10.2, signal: 'hold',       note: 'Broad market core; low cost, maximum diversification.' },
   'VXUS':  { pe: 14.8, divYield: 2.84, ret52w: 14.2, proj12m:  8.8, signal: 'hold',       note: 'International hedge; benefits from weaker USD cycles.' },
   'VWO':   { pe: 12.4, divYield: 3.24, ret52w:  8.4, proj12m:  9.2, signal: 'hold',       note: 'Emerging market growth at valuation discount vs US.' },
   'BND':   { pe: null, divYield: 4.18, ret52w:  3.2, proj12m:  4.4, signal: 'hold',       note: 'Rate-sensitive; hold for income and volatility buffer.' },
   'TLT':   { pe: null, divYield: 4.52, ret52w: -8.1, proj12m:  6.2, signal: 'hold',       note: 'Long-duration risk; watch Fed signals before adding.' },
+  'AGG':   { pe: null, divYield: 4.22, ret52w:  3.4, proj12m:  4.6, signal: 'hold',       note: 'Core investment-grade bond exposure; low duration risk.' },
+  'LQD':   { pe: null, divYield: 5.14, ret52w:  4.1, proj12m:  5.2, signal: 'hold',       note: 'IG corporate spread provides yield premium over Treasuries.' },
+  'IEF':   { pe: null, divYield: 3.84, ret52w:  1.2, proj12m:  4.2, signal: 'hold',       note: 'Intermediate Treasury duration; moderate rate sensitivity.' },
+  'HYG':   { pe: null, divYield: 6.42, ret52w:  5.4, proj12m:  6.4, signal: 'hold',       note: 'High-yield credit spread; equity-like risk in stress scenarios.' },
   'GLD':   { pe: null, divYield: 0.00, ret52w: 18.4, proj12m:  8.2, signal: 'overweight', note: 'Inflation hedge with strong momentum and geopolitical bid.' },
+  'VNQ':   { pe: 36.4, divYield: 4.12, ret52w:  2.8, proj12m:  7.4, signal: 'hold',       note: 'Rate-sensitive REIT; set to benefit from rate cuts.' },
+  'SHV':   { pe: null, divYield: 5.12, ret52w:  5.1, proj12m:  4.8, signal: 'hold',       note: 'Cash equivalent; max liquidity, no duration risk.' },
+  'BRK.B': { pe: 14.2, divYield: 0.00, ret52w:  8.4, proj12m:  7.8, signal: 'hold',       note: 'Defensive value; insurance float + operating earnings backstop.' },
+  // Technology
   'AAPL':  { pe: 31.2, divYield: 0.48, ret52w: 12.1, proj12m:  9.4, signal: 'hold',       note: 'Mature growth; high-margin services mix supports premium.' },
   'MSFT':  { pe: 35.8, divYield: 0.72, ret52w: 16.4, proj12m: 12.1, signal: 'hold',       note: 'Cloud + AI tailwinds support valuation; Copilot monetisation.' },
   'NVDA':  { pe: 52.1, divYield: 0.03, ret52w: 89.3, proj12m: 22.4, signal: 'overweight', note: 'AI infrastructure demand accelerating; data-center cycle strong.' },
   'GOOGL': { pe: 24.6, divYield: 0.00, ret52w: 28.4, proj12m: 14.8, signal: 'overweight', note: 'Search + cloud at reasonable valuation; Gemini integration upside.' },
-  'BRK.B': { pe: 14.2, divYield: 0.00, ret52w:  8.4, proj12m:  7.8, signal: 'hold',       note: 'Defensive value; insurance float + operating earnings backstop.' },
+  'META':  { pe: 28.4, divYield: 0.40, ret52w: 41.2, proj12m: 18.4, signal: 'overweight', note: 'Ad revenue recovery + AI investment cycle; Reality Labs drag fading.' },
+  'AMZN':  { pe: 40.2, divYield: 0.00, ret52w: 32.1, proj12m: 16.2, signal: 'overweight', note: 'AWS margin expansion drives earnings; advertising segment accelerating.' },
+  'AVGO':  { pe: 38.4, divYield: 1.52, ret52w: 44.2, proj12m: 19.8, signal: 'overweight', note: 'Custom AI silicon and networking demand driving outsized growth.' },
+  'AMD':   { pe: 45.2, divYield: 0.00, ret52w: 22.4, proj12m: 16.8, signal: 'hold',       note: 'Data-center GPU share gains vs NVDA; PC cycle recovery adds upside.' },
+  'TSLA':  { pe: 68.4, divYield: 0.00, ret52w: -8.2, proj12m: 10.4, signal: 'hold',       note: 'Energy business and FSD optionality offset near-term margin pressure.' },
+  'NFLX':  { pe: 42.1, divYield: 0.00, ret52w: 62.4, proj12m: 18.2, signal: 'hold',       note: 'Ad tier and password-sharing crackdown drove subscriber re-acceleration.' },
+  'ORCL':  { pe: 32.4, divYield: 1.12, ret52w: 24.8, proj12m: 13.4, signal: 'hold',       note: 'Cloud infrastructure deal wins accelerating; multi-cloud positioning.' },
+  'CRM':   { pe: 38.2, divYield: 0.00, ret52w: 18.4, proj12m: 11.8, signal: 'hold',       note: 'AI Agentforce integration supports ARPU expansion across enterprise base.' },
+  'ADBE':  { pe: 30.4, divYield: 0.00, ret52w: 14.2, proj12m: 11.4, signal: 'hold',       note: 'Creative + document cloud defensible; Firefly AI extends competitive moat.' },
+  'QCOM':  { pe: 18.4, divYield: 2.24, ret52w: 14.4, proj12m: 11.2, signal: 'hold',       note: 'Automotive and IoT diversification offsets handset concentration risk.' },
+  'INTC':  { pe: 28.4, divYield: 1.84, ret52w:-32.4, proj12m:  6.4, signal: 'hold',       note: 'Foundry strategy execution risk; process node recovery is multi-year.' },
+  // Healthcare
+  'LLY':   { pe: 52.4, divYield: 0.72, ret52w: 42.1, proj12m: 18.2, signal: 'overweight', note: 'GLP-1 obesity franchise (Zepbound/Mounjaro) drives multi-year earnings ramp.' },
+  'UNH':   { pe: 22.4, divYield: 1.52, ret52w:  8.4, proj12m: 10.4, signal: 'hold',       note: 'Managed care scale advantage; Optum vertical integration adds margin.' },
+  'ABBV':  { pe: 18.4, divYield: 3.52, ret52w: 12.4, proj12m: 11.2, signal: 'hold',       note: 'Humira biosimilar headwinds partially offset by Skyrizi and Rinvoq ramp.' },
   'JNJ':   { pe: 16.8, divYield: 3.12, ret52w: -4.2, proj12m:  5.1, signal: 'hold',       note: 'Pharma spin-off drag; stable yield with litigation headwinds.' },
-  'VNQ':   { pe: 36.4, divYield: 4.12, ret52w:  2.8, proj12m:  7.4, signal: 'hold',       note: 'Rate-sensitive REIT; set to benefit from rate cuts.' },
-  'SHV':   { pe: null, divYield: 5.12, ret52w:  5.1, proj12m:  4.8, signal: 'hold',       note: 'Cash equivalent; max liquidity, no duration risk.' },
+  'TMO':   { pe: 28.4, divYield: 0.22, ret52w: 14.2, proj12m: 12.4, signal: 'hold',       note: 'Life-sciences tools leader; bioprocessing recovery supports re-acceleration.' },
+  'AMGN':  { pe: 14.2, divYield: 3.12, ret52w:  4.2, proj12m:  8.4, signal: 'hold',       note: 'Established biologics franchise; obesity drug pipeline adds optionality.' },
+  'GILD':  { pe: 12.4, divYield: 3.84, ret52w:  8.4, proj12m:  9.2, signal: 'hold',       note: 'HIV franchise durable; oncology pipeline (TL-1A) emerging catalyst.' },
+  'MRK':   { pe: 14.8, divYield: 2.92, ret52w: -8.4, proj12m:  7.2, signal: 'hold',       note: 'Keytruda patent cliff a long-term risk; vaccine pipeline provides buffer.' },
+  'ABT':   { pe: 22.4, divYield: 1.92, ret52w: 12.4, proj12m:  9.8, signal: 'hold',       note: 'Diagnostics and MedTech diversification; FreeStyle Libre growth durable.' },
+  // Financials
+  'JPM':   { pe: 12.4, divYield: 2.52, ret52w: 28.4, proj12m: 12.4, signal: 'hold',       note: 'Best-in-class franchise; ROTCE leadership sustainable through the cycle.' },
+  'GS':    { pe: 14.2, divYield: 2.12, ret52w: 34.2, proj12m: 14.8, signal: 'overweight', note: 'Capital markets and M&A backlog recovery; trading desk strong.' },
+  'BLK':   { pe: 22.4, divYield: 2.14, ret52w: 18.4, proj12m: 11.2, signal: 'hold',       note: 'AUM scale and alternatives expansion; ETF ecosystem durable moat.' },
+  'V':     { pe: 28.4, divYield: 0.82, ret52w: 22.4, proj12m: 13.4, signal: 'hold',       note: 'Network effect moat; cross-border payment volume resilient to rate cycle.' },
+  'MA':    { pe: 32.4, divYield: 0.62, ret52w: 18.4, proj12m: 13.8, signal: 'hold',       note: 'Services revenue mix and B2B payments expansion drive premium multiple.' },
+  'SPGI':  { pe: 36.4, divYield: 0.82, ret52w: 14.2, proj12m: 11.8, signal: 'hold',       note: 'Ratings and data moats durable; issuance cycle recovery is a tailwind.' },
+  'BAC':   { pe: 12.8, divYield: 2.84, ret52w: 24.4, proj12m: 10.8, signal: 'hold',       note: 'Rate-sensitive NII; consumer credit quality stable, deposit base large.' },
+  'AXP':   { pe: 18.4, divYield: 1.24, ret52w: 22.4, proj12m: 12.4, signal: 'hold',       note: 'Premium cardholder resilience; spending volume and fee income growing.' },
+  // Energy
+  'XOM':   { pe: 12.4, divYield: 3.52, ret52w:  4.2, proj12m:  8.4, signal: 'hold',       note: 'Pioneer acquisition improves Permian cost structure; dividend well covered.' },
+  'CVX':   { pe: 14.2, divYield: 4.12, ret52w:  2.4, proj12m:  8.8, signal: 'hold',       note: 'Balance sheet strength supports buybacks; Hess deal extends growth runway.' },
+  'COP':   { pe: 12.8, divYield: 3.14, ret52w:  6.4, proj12m:  9.2, signal: 'hold',       note: 'Variable + base dividend model rewarding; low-cost unconventional assets.' },
+  'EOG':   { pe: 10.4, divYield: 2.84, ret52w:  2.2, proj12m:  8.2, signal: 'hold',       note: 'Premium E&P discipline; Dorado gas play provides long-duration optionality.' },
+  'OXY':   { pe:  8.4, divYield: 1.52, ret52w: -4.2, proj12m:  7.8, signal: 'hold',       note: 'CrownRock integration underway; Buffett stake provides sentiment support.' },
+  // Consumer
+  'COST':  { pe: 48.4, divYield: 0.62, ret52w: 28.4, proj12m: 13.4, signal: 'hold',       note: 'Membership renewal rate approaching 93%; international expansion durable.' },
+  'HD':    { pe: 22.4, divYield: 2.52, ret52w: 12.4, proj12m: 10.4, signal: 'hold',       note: 'Pro contractor market resilient; housing turnover recovery is the catalyst.' },
+  'MCD':   { pe: 22.4, divYield: 2.42, ret52w:  4.2, proj12m:  8.8, signal: 'hold',       note: 'Value platform and digital loyalty driving traffic in a cautious consumer.' },
+  'KO':    { pe: 24.4, divYield: 3.12, ret52w:  4.4, proj12m:  7.4, signal: 'hold',       note: 'Pricing power demonstrated; emerging market volumes support modest growth.' },
+  'WMT':   { pe: 32.4, divYield: 1.22, ret52w: 24.4, proj12m: 12.4, signal: 'hold',       note: 'Advertising and marketplace revenue streams diversifying earnings quality.' },
+  'PEP':   { pe: 20.4, divYield: 3.42, ret52w: -2.4, proj12m:  7.2, signal: 'hold',       note: 'Volume pressure from GLP-1 snacking impact; pricing moderation needed.' },
+  'PG':    { pe: 26.4, divYield: 2.42, ret52w:  4.8, proj12m:  7.8, signal: 'hold',       note: 'Premium portfolio pricing; emerging market mix shift supports long term.' },
 };
 
 // Peer alternatives per sector — used for switch suggestions and comparison rows
 const SECTOR_ALT_POOL = {
+  // ── AI portfolio sectors ────────────────────────────────────────────────────
+  'Technology': [
+    { ticker: 'NVDA',  name: 'NVIDIA Corp.',          pe: 52.1, divYield: 0.03, ret52w: 89.3, proj12m: 22.4 },
+    { ticker: 'AVGO',  name: 'Broadcom Inc.',          pe: 38.4, divYield: 1.52, ret52w: 44.2, proj12m: 19.8 },
+    { ticker: 'META',  name: 'Meta Platforms',         pe: 28.4, divYield: 0.40, ret52w: 41.2, proj12m: 18.4 },
+    { ticker: 'AMZN',  name: 'Amazon.com',             pe: 40.2, divYield: 0.00, ret52w: 32.1, proj12m: 16.2 },
+    { ticker: 'GOOGL', name: 'Alphabet Inc.',          pe: 24.6, divYield: 0.00, ret52w: 28.4, proj12m: 14.8 },
+    { ticker: 'AMD',   name: 'Advanced Micro Devices', pe: 45.2, divYield: 0.00, ret52w: 22.4, proj12m: 16.8 },
+    { ticker: 'MSFT',  name: 'Microsoft Corp.',        pe: 35.8, divYield: 0.72, ret52w: 16.4, proj12m: 12.1 },
+    { ticker: 'AAPL',  name: 'Apple Inc.',             pe: 31.2, divYield: 0.48, ret52w: 12.1, proj12m:  9.4 },
+  ],
+  'Healthcare': [
+    { ticker: 'LLY',  name: 'Eli Lilly & Co.',         pe: 52.4, divYield: 0.72, ret52w: 42.1, proj12m: 18.2 },
+    { ticker: 'TMO',  name: 'Thermo Fisher Scientific', pe: 28.4, divYield: 0.22, ret52w: 14.2, proj12m: 12.4 },
+    { ticker: 'UNH',  name: 'UnitedHealth Group',       pe: 22.4, divYield: 1.52, ret52w:  8.4, proj12m: 10.4 },
+    { ticker: 'ABBV', name: 'AbbVie Inc.',              pe: 18.4, divYield: 3.52, ret52w: 12.4, proj12m: 11.2 },
+    { ticker: 'ABT',  name: 'Abbott Laboratories',      pe: 22.4, divYield: 1.92, ret52w: 12.4, proj12m:  9.8 },
+    { ticker: 'AMGN', name: 'Amgen Inc.',               pe: 14.2, divYield: 3.12, ret52w:  4.2, proj12m:  8.4 },
+    { ticker: 'GILD', name: 'Gilead Sciences',          pe: 12.4, divYield: 3.84, ret52w:  8.4, proj12m:  9.2 },
+  ],
+  'Financials': [
+    { ticker: 'GS',   name: 'Goldman Sachs',    pe: 14.2, divYield: 2.12, ret52w: 34.2, proj12m: 14.8 },
+    { ticker: 'V',    name: 'Visa Inc.',         pe: 28.4, divYield: 0.82, ret52w: 22.4, proj12m: 13.4 },
+    { ticker: 'MA',   name: 'Mastercard Inc.',   pe: 32.4, divYield: 0.62, ret52w: 18.4, proj12m: 13.8 },
+    { ticker: 'AXP',  name: 'American Express',  pe: 18.4, divYield: 1.24, ret52w: 22.4, proj12m: 12.4 },
+    { ticker: 'JPM',  name: 'JPMorgan Chase',    pe: 12.4, divYield: 2.52, ret52w: 28.4, proj12m: 12.4 },
+    { ticker: 'BLK',  name: 'BlackRock Inc.',    pe: 22.4, divYield: 2.14, ret52w: 18.4, proj12m: 11.2 },
+    { ticker: 'SPGI', name: 'S&P Global',        pe: 36.4, divYield: 0.82, ret52w: 14.2, proj12m: 11.8 },
+  ],
+  'Energy': [
+    { ticker: 'COP', name: 'ConocoPhillips',       pe: 12.8, divYield: 3.14, ret52w:  6.4, proj12m:  9.2 },
+    { ticker: 'CVX', name: 'Chevron Corp.',         pe: 14.2, divYield: 4.12, ret52w:  2.4, proj12m:  8.8 },
+    { ticker: 'XOM', name: 'Exxon Mobil Corp.',     pe: 12.4, divYield: 3.52, ret52w:  4.2, proj12m:  8.4 },
+    { ticker: 'EOG', name: 'EOG Resources',         pe: 10.4, divYield: 2.84, ret52w:  2.2, proj12m:  8.2 },
+    { ticker: 'OXY', name: 'Occidental Petroleum',  pe:  8.4, divYield: 1.52, ret52w: -4.2, proj12m:  7.8 },
+  ],
+  'Consumer': [
+    { ticker: 'COST', name: 'Costco Wholesale', pe: 48.4, divYield: 0.62, ret52w: 28.4, proj12m: 13.4 },
+    { ticker: 'WMT',  name: 'Walmart Inc.',      pe: 32.4, divYield: 1.22, ret52w: 24.4, proj12m: 12.4 },
+    { ticker: 'HD',   name: 'Home Depot Inc.',   pe: 22.4, divYield: 2.52, ret52w: 12.4, proj12m: 10.4 },
+    { ticker: 'MCD',  name: "McDonald's Corp.",  pe: 22.4, divYield: 2.42, ret52w:  4.2, proj12m:  8.8 },
+    { ticker: 'PG',   name: 'Procter & Gamble',  pe: 26.4, divYield: 2.42, ret52w:  4.8, proj12m:  7.8 },
+    { ticker: 'KO',   name: 'Coca-Cola Co.',     pe: 24.4, divYield: 3.12, ret52w:  4.4, proj12m:  7.4 },
+    { ticker: 'PEP',  name: 'PepsiCo Inc.',      pe: 20.4, divYield: 3.42, ret52w: -2.4, proj12m:  7.2 },
+  ],
+  // ── Legacy / fallback sectors ───────────────────────────────────────────────
   'US Equity': [
     { ticker: 'NVDA',  name: 'NVIDIA Corp.',       pe: 52.1, divYield: 0.03, ret52w: 89.3, proj12m: 22.4 },
     { ticker: 'META',  name: 'Meta Platforms',      pe: 28.4, divYield: 0.40, ret52w: 41.2, proj12m: 18.4 },
@@ -718,11 +813,20 @@ function generateSwitchSuggestions(positions) {
   return suggestions.sort((a, b) => b.uplift - a.uplift).slice(0, 3);
 }
 
-// Period buttons for historical performance chart (always includes 3Y for 1yr+ terms)
+// Period buttons for the projected trajectory chart.
+// Always includes the full-term button so users can see the entire horizon.
 function getPeriodsForTerm(term) {
-  if (term <= 0.5) return ['1M', '3M', '6M'];
-  if (term <= 1)   return ['1M', '3M', '6M', '1Y'];
-  return ['1M', '3M', '6M', '1Y', '3Y'];
+  if (term <= 0.5) return ['3M', '6M'];
+  if (term <= 1)   return ['6M', '1Y'];
+  const MILESTONES = [1, 3, 5, 10, 15, 20];
+  const buttons = [];
+  for (const y of MILESTONES) {
+    if (y < term)      { buttons.push(`${y}Y`); }
+    else if (y === term) { buttons.push(`${y}Y`); return buttons; }
+    else               { buttons.push(`${term}Y`); return buttons; }
+  }
+  if (!buttons.includes(`${term}Y`)) buttons.push(`${term}Y`);
+  return buttons;
 }
 
 // Derive period buttons from actual series data span so buttons never exceed

@@ -173,7 +173,8 @@ function Spinner() {
 // ── Dashboard ────────────────────────────────────────────────────────────
 function Dashboard({ copy, profile, portfolio, density, mode = 'initial', pendingOrders = [], onAddOrder, onRemoveOrder, onAuthorize, onBuy, onCounsel, onModify, chartPeriod = 'Max', onChartPeriodChange, currentScreen, onNavigate, automation = {} }) {
   const [expanded, setExpanded] = useState2(null);
-  const [projectedChartPeriod, setProjectedChartPeriod] = useState2('1Y');
+  const defaultProjectedPeriod = portfolio.term <= 1 ? '1Y' : `${portfolio.term}Y`;
+  const [projectedChartPeriod, setProjectedChartPeriod] = useState2(defaultProjectedPeriod);
   const compact = density === 'compact';
   const dense = density === 'dense';
 
