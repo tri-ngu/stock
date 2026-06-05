@@ -816,8 +816,8 @@ function generateSwitchSuggestions(positions) {
 // Period buttons for the projected trajectory chart.
 // Always includes the full-term button so users can see the entire horizon.
 function getPeriodsForTerm(term) {
-  if (term <= 0.5) return ['3M', '6M'];
-  if (term <= 1)   return ['6M', '1Y'];
+  if (term <= 0.5) return ['2M', '4M', '6M'];
+  if (term <= 1)   return ['3M', '6M', '9M', '1Y'];
   const MILESTONES = [1, 3, 5, 10, 15, 20];
   const buttons = [];
   for (const y of MILESTONES) {
