@@ -25,6 +25,11 @@ async function buildPortfolioWithRealData(budget, risk, term, tickers, aiPortfol
     // These come from the MVO optimizer and already enforce the risk-level split.
     const aiPos = aiPortfolio?.positions || null;
 
+    // Per-position editorial analysis from backend (keyed by ticker)
+    const posDetailsList = aiPortfolio?.position_details || [];
+    const posDetails = {};
+    for (const d of posDetailsList) posDetails[d.ticker] = d;
+
     // ── Build positions ──────────────────────────────────────────────────
     const positions = [];
     for (const ticker of tickers) {
@@ -45,6 +50,7 @@ async function buildPortfolioWithRealData(budget, risk, term, tickers, aiPortfol
 
       if (dollars <= 0 || price <= 0) continue;
 
+      const d = posDetails[ticker] || {};
       positions.push({
         ticker,
         name:   meta.name,
@@ -54,6 +60,15 @@ async function buildPortfolioWithRealData(budget, risk, term, tickers, aiPortfol
         dollars,
         shares:  +(dollars / price).toFixed(4),
         day:     meta.day || 0,
+        // Editorial card fields from backend reasoning engine
+        signal:         d.signal         || 'hold',
+        headline:       d.headline       || '',
+        whyThisStock:   d.why_this_stock || '',
+        allocationLogic:d.allocation_logic || '',
+        sectorRole:     d.sector_role    || '',
+        goalAlignment:  d.goal_alignment || '',
+        peers:          d.peers          || [],
+        verdicts:       d.verdicts       || [],
       });
     }
 

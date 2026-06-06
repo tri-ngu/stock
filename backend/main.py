@@ -130,6 +130,7 @@ async def chat(request: MessageRequest):
                                 'budget': result.get('budget', 0),
                                 'risk_level': result.get('risk_level', 'moderate'),
                                 'positions': result.get('positions', {}),
+                                'position_details': result.get('position_details', []),
                                 'stocks': result.get('stocks', []),
                                 'expected_return': result.get('expected_return', 0),
                                 'volatility': result.get('volatility', 0),

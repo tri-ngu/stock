@@ -170,6 +170,134 @@ function Spinner() {
   );
 }
 
+// ── Holding editorial card ───────────────────────────────────────────────
+function HoldingCard({ position: p, expanded, onToggle }) {
+  const getM = typeof window.getTickerMetrics === 'function' ? window.getTickerMetrics : () => ({ pe: null, divYield: 0, ret52w: 0, proj12m: 0 });
+  const signalColor = { overweight: 'var(--gain)', reduce: 'var(--loss)', hold: 'var(--ink-mute)' }[p.signal] || 'var(--ink-mute)';
+  const signalLabel = { overweight: 'overweight', reduce: 'trim', hold: 'hold' }[p.signal] || 'hold';
+  const sectorDot = SECTOR_COLORS[p.sector] || 'var(--ink-mute)';
+  const selfM = getM(p.ticker);
+
+  return (
+    <div style={{ border: '1px solid var(--rule)', background: expanded ? 'var(--surface)' : 'transparent', transition: 'background 0.15s' }}>
+      {/* Collapsed header */}
+      <div onClick={onToggle} style={{ display: 'grid', gridTemplateColumns: '80px 1fr auto', cursor: 'pointer', userSelect: 'none' }}>
+        {/* Left col — ticker + weight + sector bar */}
+        <div style={{ padding: '14px 12px', borderRight: '1px solid var(--rule)', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 5, position: 'relative' }}>
+          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: sectorDot }} />
+          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em' }}>{p.ticker}</div>
+          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: signalColor }}>{(p.weight * 100).toFixed(1)}%</div>
+          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 8.5, color: signalColor, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{signalLabel}</div>
+        </div>
+        {/* Main — headline + tags */}
+        <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 6 }}>
+          <div style={{ fontFamily: 'Newsreader, serif', fontStyle: 'italic', fontSize: 14.5, lineHeight: 1.45, color: 'var(--ink)' }}>
+            {p.headline || p.name}
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-mute)', background: 'color-mix(in oklab, var(--ink) 8%, transparent)', padding: '2px 6px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{p.sector}</span>
+            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: signalColor, background: 'color-mix(in oklab, currentColor 12%, transparent)', padding: '2px 6px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{signalLabel}</span>
+            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-mute)' }}>{fmtUSD(p.dollars, { decimals: 0 })}</span>
+          </div>
+        </div>
+        {/* Right col — expand toggle */}
+        <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 6, borderLeft: '1px solid var(--rule)' }}>
+          <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5, color: 'var(--ink-mute)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Details</span>
+          <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-mute)', transition: 'transform 0.2s', display: 'inline-block', transform: expanded ? 'rotate(180deg)' : 'none' }}>▼</span>
+        </div>
+      </div>
+
+      {/* Expanded body */}
+      {expanded && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderTop: '1px solid var(--rule)' }}>
+          {/* Agent Reasoning */}
+          <div style={{ padding: '20px 24px', borderRight: '1px solid var(--rule)' }}>
+            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-mute)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 16 }}>Agent Reasoning</div>
+            {[
+              { key: 'Why This Stock', val: p.whyThisStock },
+              { key: 'Allocation Logic', val: p.allocationLogic },
+              { key: 'Sector Role', val: p.sectorRole },
+              { key: 'Goal Alignment', val: p.goalAlignment },
+            ].map(({ key, val }) => val ? (
+              <div key={key} style={{ marginBottom: 16 }}>
+                <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 8.5, color: 'var(--ink-mute)', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 5 }}>{key}</div>
+                <div style={{ fontFamily: 'Newsreader, serif', fontSize: 13.5, lineHeight: 1.6, color: 'var(--ink-soft)' }}>{val}</div>
+              </div>
+            ) : null)}
+          </div>
+
+          {/* Peer comparison + verdict */}
+          <div style={{ padding: '20px 24px' }}>
+            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-mute)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 12 }}>Peer Comparison</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'JetBrains Mono, monospace', fontSize: 10.5 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--rule)' }}>
+                  {['', 'P/E', 'Yield', '52W', '12M Proj.'].map((h, hi) => (
+                    <th key={hi} style={{ textAlign: hi === 0 ? 'left' : 'right', padding: '4px 8px', fontWeight: 400, fontSize: 8.5, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-mute)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {/* Self row */}
+                <tr style={{ background: 'color-mix(in oklab, var(--ink) 6%, transparent)' }}>
+                  <td style={{ padding: '7px 8px', fontWeight: 700 }}>{p.ticker} <span style={{ color: 'var(--ink-mute)', fontWeight: 400, fontSize: 8.5 }}>← holding</span></td>
+                  <td style={{ padding: '7px 8px', textAlign: 'right', color: 'var(--ink-soft)' }}>{selfM.pe != null ? selfM.pe.toFixed(1) : '—'}</td>
+                  <td style={{ padding: '7px 8px', textAlign: 'right', color: 'var(--ink-soft)' }}>{selfM.divYield > 0 ? selfM.divYield.toFixed(2) + '%' : '—'}</td>
+                  <td style={{ padding: '7px 8px', textAlign: 'right' }}><Delta value={selfM.ret52w} /></td>
+                  <td style={{ padding: '7px 8px', textAlign: 'right' }}>+{(selfM.proj12m || 0).toFixed(1)}%</td>
+                </tr>
+                {/* Peer rows */}
+                {(p.peers || []).map((peer, pi) => {
+                  const pm = getM(peer.ticker);
+                  const better = pm.proj12m > (selfM.proj12m || 0);
+                  return (
+                    <React.Fragment key={peer.ticker}>
+                      <tr style={{ borderTop: '1px solid var(--rule)' }}>
+                        <td style={{ padding: '7px 8px', color: 'var(--ink-soft)' }}>
+                          {peer.ticker}
+                          {better && <span style={{ color: 'var(--gain)', marginLeft: 5, fontSize: 8.5, fontWeight: 600 }}>↑ better proj.</span>}
+                        </td>
+                        <td style={{ padding: '7px 8px', textAlign: 'right', color: 'var(--ink-soft)' }}>{pm.pe != null ? pm.pe.toFixed(1) : '—'}</td>
+                        <td style={{ padding: '7px 8px', textAlign: 'right', color: 'var(--ink-soft)' }}>{pm.divYield > 0 ? pm.divYield.toFixed(2) + '%' : '—'}</td>
+                        <td style={{ padding: '7px 8px', textAlign: 'right' }}><Delta value={pm.ret52w} /></td>
+                        <td style={{ padding: '7px 8px', textAlign: 'right', fontWeight: better ? 600 : 400, color: better ? 'var(--gain)' : 'inherit' }}>+{(pm.proj12m || 0).toFixed(1)}%</td>
+                      </tr>
+                      {peer.note && (
+                        <tr>
+                          <td colSpan={5} style={{ padding: '2px 8px 10px', fontFamily: 'Newsreader, serif', fontStyle: 'italic', fontSize: 12, color: 'var(--ink-mute)', lineHeight: 1.4 }}>{peer.note}</td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {/* Verdict summary */}
+            {(p.verdicts || []).length > 0 && (
+              <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--rule)' }}>
+                <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 8.5, color: 'var(--ink-mute)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 8 }}>vs. Peers — Verdict</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {p.verdicts.map((v, vi) => {
+                    const isPrefer = v.type === 'prefer';
+                    return (
+                      <div key={vi} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '7px 10px', background: isPrefer ? 'color-mix(in oklab, var(--gain) 10%, transparent)' : 'color-mix(in oklab, oklch(0.58 0.12 60) 12%, transparent)' }}>
+                        <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 7.5, letterSpacing: '0.08em', textTransform: 'uppercase', background: isPrefer ? 'var(--gain)' : 'oklch(0.58 0.12 60)', color: 'var(--bg)', padding: '2px 5px', whiteSpace: 'nowrap', marginTop: 2, flexShrink: 0 }}>{isPrefer ? 'prefer over' : 'consider instead'}</span>
+                        <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5, fontWeight: 700, color: 'var(--ink)', marginTop: 2, marginRight: 4, flexShrink: 0 }}>{v.ticker}</span>
+                        <span style={{ fontFamily: 'Newsreader, serif', fontSize: 12.5, color: 'var(--ink-soft)', lineHeight: 1.45 }}>{v.text}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Dashboard ────────────────────────────────────────────────────────────
 function Dashboard({ copy, profile, portfolio, density, mode = 'initial', pendingOrders = [], onAddOrder, onRemoveOrder, onAuthorize, onBuy, onCounsel, onModify, chartPeriod = 'Max', onChartPeriodChange, currentScreen, onNavigate, automation = {} }) {
   const [expanded, setExpanded] = useState2(null);
@@ -349,69 +477,21 @@ function Dashboard({ copy, profile, portfolio, density, mode = 'initial', pendin
             </section>
           )}
 
-          {/* Holdings table */}
+          {/* Holdings cards */}
           <section>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
+            <div style={{ marginBottom: 12 }}>
               <Eyebrow>Holdings · {portfolio.positions.length}</Eyebrow>
-              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: 'var(--ink-mute)', letterSpacing: '0.1em' }}>
-                Click any row to expand
-              </div>
             </div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5 }}>
-              <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--ink)' }}>
-                  {['Ticker', 'Name', 'Weight', 'Shares', 'Price', 'Value', 'Day'].map((h, i) => (
-                    <th key={i} style={{ padding: '8px 10px', fontWeight: 500, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-mute)', textAlign: i >= 2 ? 'right' : 'left' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {portfolio.positions.map((p, i) => {
-                  const isOpen = expanded === p.ticker;
-                  return (
-                    <React.Fragment key={p.ticker}>
-                      <tr onClick={() => setExpanded(isOpen ? null : p.ticker)} style={{
-                        borderBottom: '1px solid var(--rule)', cursor: 'pointer',
-                        background: isOpen ? 'var(--surface)' : 'transparent',
-                      }}>
-                        <td style={{ padding: '10px', fontWeight: 500, color: 'var(--ink)' }}>
-                          <span style={{ display: 'inline-block', width: 6, height: 6, background: SECTOR_COLORS[p.sector], marginRight: 8, verticalAlign: 'middle' }} />
-                          {p.ticker}
-                        </td>
-                        <td style={{ padding: '10px', color: 'var(--ink-soft)', fontFamily: 'Newsreader, serif', fontSize: 13 }}>{p.name}</td>
-                        <td style={{ padding: '10px', textAlign: 'right' }}>{(p.weight * 100).toFixed(1)}%</td>
-                        <td style={{ padding: '10px', textAlign: 'right', color: 'var(--ink-soft)' }}>{p.shares.toFixed(2)}</td>
-                        <td style={{ padding: '10px', textAlign: 'right' }}>${p.price.toFixed(2)}</td>
-                        <td style={{ padding: '10px', textAlign: 'right', fontWeight: 500 }}>{fmtUSD(p.dollars, { decimals: 0 })}</td>
-                        <td style={{ padding: '10px', textAlign: 'right' }}><Delta value={p.day} /></td>
-                      </tr>
-                      {isOpen && (
-                        <tr style={{ background: 'var(--surface)', borderBottom: '1px solid var(--rule)' }}>
-                          <td colSpan={7} style={{ padding: '8px 10px 16px 30px' }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 28, alignItems: 'center' }}>
-                              <div>
-                                <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-mute)', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 4 }}>30-day price action</div>
-                                <Candles width={300} height={48} data={genCandles(p)} />
-                              </div>
-                              <div>
-                                <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Role</div>
-                                <div style={{ fontFamily: 'Newsreader, serif', fontSize: 14, marginTop: 2, color: 'var(--ink)' }}>{p.sector}</div>
-                                <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 4 }}>Contributes broad market exposure with minimal idiosyncratic risk.</div>
-                              </div>
-                              <div>
-                                <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Cost basis</div>
-                                <div style={{ fontFamily: 'Newsreader, serif', fontSize: 18, marginTop: 2 }}>${p.price.toFixed(2)}</div>
-                                <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 4 }}>P/E 22.4 · Yield 1.3%</div>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {portfolio.positions.map((p) => (
+                <HoldingCard
+                  key={p.ticker}
+                  position={p}
+                  expanded={expanded === p.ticker}
+                  onToggle={() => setExpanded(expanded === p.ticker ? null : p.ticker)}
+                />
+              ))}
+            </div>
           </section>
         </div>
 
