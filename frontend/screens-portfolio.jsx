@@ -300,7 +300,6 @@ function HoldingCard({ position: p, expanded, onToggle }) {
 
 // ── Dashboard ────────────────────────────────────────────────────────────
 function Dashboard({ copy, profile, portfolio, density, mode = 'initial', pendingOrders = [], onAddOrder, onRemoveOrder, onAuthorize, onBuy, onCounsel, onModify, chartPeriod = 'Max', onChartPeriodChange, currentScreen, onNavigate, automation = {} }) {
-  const [expanded, setExpanded] = useState2(null);
   const defaultProjectedPeriod = portfolio.term <= 0.5 ? '6M' : portfolio.term <= 1 ? '1Y' : `${portfolio.term}Y`;
   const [projectedChartPeriod, setProjectedChartPeriod] = useState2(defaultProjectedPeriod);
   const compact = density === 'compact';
@@ -477,20 +476,28 @@ function Dashboard({ copy, profile, portfolio, density, mode = 'initial', pendin
             </section>
           )}
 
-          {/* Holdings cards */}
+          {/* Holdings summary — simple weight list; full analysis is on the Counsel page */}
           <section>
-            <div style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: 10 }}>
               <Eyebrow>Holdings · {portfolio.positions.length}</Eyebrow>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {portfolio.positions.map((p) => (
-                <HoldingCard
-                  key={p.ticker}
-                  position={p}
-                  expanded={expanded === p.ticker}
-                  onToggle={() => setExpanded(expanded === p.ticker ? null : p.ticker)}
-                />
-              ))}
+            <div style={{ borderTop: '1px solid var(--ink)' }}>
+              {portfolio.positions.map((p, i) => {
+                const signalColor = { overweight: 'var(--gain)', reduce: 'var(--loss)', hold: 'var(--ink-mute)' }[p.signal] || 'var(--ink-mute)';
+                const sectorDot = SECTOR_COLORS[p.sector] || 'var(--ink-mute)';
+                return (
+                  <div key={p.ticker} style={{ borderBottom: '1px solid var(--rule)', padding: '9px 0', display: 'grid', gridTemplateColumns: '10px 72px 1fr auto auto', gap: 10, alignItems: 'center' }}>
+                    <div style={{ width: 3, height: 28, background: sectorDot, borderRadius: 1 }} />
+                    <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 700 }}>{p.ticker}</div>
+                    <div style={{ fontFamily: 'Newsreader, serif', fontStyle: 'italic', fontSize: 12, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.headline || p.name}</div>
+                    <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: signalColor, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{p.signal || 'hold'}</div>
+                    <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, textAlign: 'right', minWidth: 40 }}>{(p.weight * 100).toFixed(1)}%</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 8, fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5, color: 'var(--ink-mute)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+              Full holding-by-holding analysis in Counsel →
             </div>
           </section>
         </div>
@@ -994,6 +1001,12 @@ function Counsel({ copy, profile, portfolio, automation, setAutomation, onBack, 
   const [scheduled, setScheduled] = useState2({});
   const [reviewModal, setReviewModal] = useState2(null);
   const [reviewed, setReviewed] = useState2({});
+  const [expandedCards, setExpandedCards] = useState2(new Set());
+  const toggleCard = (ticker) => setExpandedCards(prev => {
+    const next = new Set(prev);
+    if (next.has(ticker)) next.delete(ticker); else next.add(ticker);
+    return next;
+  });
   return (
     <div style={{ height: '100%', background: 'var(--bg)', color: 'var(--ink)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 40px', borderBottom: '1px solid var(--rule)' }}>
@@ -1015,8 +1028,25 @@ function Counsel({ copy, profile, portfolio, automation, setAutomation, onBack, 
         {/* Weekly activity — full-width editorial section */}
         <WeeklyActivity portfolio={portfolio} />
 
-        {/* Per-holding analysis with peer comparison */}
-        <StockAnalysis portfolio={portfolio} />
+        {/* Holdings Analysis — Peer Comparison */}
+        {portfolio?.positions?.length > 0 && (
+          <div style={{ borderTop: '2px solid var(--ink)', padding: '32px 64px 24px' }}>
+            <Eyebrow style={{ marginBottom: 6 }}>Holdings Analysis · Peer Comparison</Eyebrow>
+            <h2 style={{ fontFamily: 'Newsreader, serif', fontSize: 32, fontWeight: 400, letterSpacing: -0.3, margin: '4px 0 18px', lineHeight: 1.1 }}>
+              Holding-by-holding analysis.
+            </h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {portfolio.positions.map((p) => (
+                <HoldingCard
+                  key={p.ticker}
+                  position={p}
+                  expanded={expandedCards.has(p.ticker)}
+                  onToggle={() => toggleCard(p.ticker)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         <div style={{ padding: '32px 64px', display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 48 }}>
           {/* Recommendations column */}

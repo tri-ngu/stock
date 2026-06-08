@@ -51,6 +51,12 @@ async function buildPortfolioWithRealData(budget, risk, term, tickers, aiPortfol
       if (dollars <= 0 || price <= 0) continue;
 
       const d = posDetails[ticker] || {};
+      // Frontend fallbacks — use curated TICKER_METRICS and SECTOR_ALT_POOL when backend didn't provide editorial data
+      const tm = TICKER_METRICS[ticker] || {};
+      const secPeers = (SECTOR_ALT_POOL[meta.sector] || [])
+        .filter(a => a.ticker !== ticker).slice(0, 3)
+        .map(p => ({ ticker: p.ticker, note: `→ ${p.ticker} offers comparable ${meta.sector} sector exposure as a sector peer.` }));
+      const wPct = (dollars / budget * 100).toFixed(1);
       positions.push({
         ticker,
         name:   meta.name,
@@ -60,15 +66,15 @@ async function buildPortfolioWithRealData(budget, risk, term, tickers, aiPortfol
         dollars,
         shares:  +(dollars / price).toFixed(4),
         day:     meta.day || 0,
-        // Editorial card fields from backend reasoning engine
-        signal:         d.signal         || 'hold',
-        headline:       d.headline       || '',
-        whyThisStock:   d.why_this_stock || '',
-        allocationLogic:d.allocation_logic || '',
-        sectorRole:     d.sector_role    || '',
-        goalAlignment:  d.goal_alignment || '',
-        peers:          d.peers          || [],
-        verdicts:       d.verdicts       || [],
+        // Editorial card fields — backend data first, frontend fallbacks second
+        signal:         d.signal          || tm.signal || 'hold',
+        headline:       d.headline        || '',
+        whyThisStock:   d.why_this_stock  || tm.note   || '',
+        allocationLogic:d.allocation_logic || `At ${wPct}%, this position is sized in line with its sector weight and risk-level allocation targets for the portfolio.`,
+        sectorRole:     d.sector_role     || `${meta.sector} sector contribution — adds diversified exposure aligned with the portfolio's allocation targets.`,
+        goalAlignment:  d.goal_alignment  || "This holding supports the portfolio's investment objectives through sector diversification and risk-adjusted allocation.",
+        peers:          (d.peers && d.peers.length) ? d.peers : secPeers,
+        verdicts:       d.verdicts        || [],
       });
     }
 
