@@ -1007,6 +1007,8 @@ function Counsel({ copy, profile, portfolio, automation, setAutomation, onBack, 
     if (next.has(ticker)) next.delete(ticker); else next.add(ticker);
     return next;
   });
+  const [expandedAction, setExpandedAction] = useState2(null);
+  const toggleAction = (key) => setExpandedAction(prev => prev === key ? null : key);
   return (
     <div style={{ height: '100%', background: 'var(--bg)', color: 'var(--ink)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 40px', borderBottom: '1px solid var(--rule)' }}>
@@ -1090,43 +1092,78 @@ function Counsel({ copy, profile, portfolio, automation, setAutomation, onBack, 
                     </header>
 
                     <div style={{ padding: '12px 14px 0', display: 'flex', flexDirection: 'column' }}>
-                      {cat.actions.map((a, ai) => (
-                        <div key={ai} style={{
-                          borderTop: '1px solid var(--rule)',
-                          padding: '12px 0', display: 'grid',
-                          gridTemplateColumns: '110px 1fr auto', gap: 16, alignItems: 'flex-start',
-                        }}>
-                          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: 'var(--ink-mute)', letterSpacing: '0.12em', textTransform: 'uppercase', paddingTop: 4 }}>{a.when}</div>
-                          <div>
-                            <div style={{ fontFamily: 'Newsreader, serif', fontSize: 16, lineHeight: 1.25 }}>{a.action}</div>
-                            <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 3, maxWidth: 440 }}>{a.detail}</div>
-                            <div style={{ marginTop: 6, fontFamily: 'JetBrains Mono, monospace', fontSize: 10.5, color: 'var(--gain)' }}>{a.impact}</div>
+                      {cat.actions.map((a, ai) => {
+                        const aKey = `${cat.id}-${ai}`;
+                        const open = expandedAction === aKey;
+                        return (
+                        <div key={ai} style={{ borderTop: '1px solid var(--rule)' }}>
+                          {/* Clickable row */}
+                          <div
+                            onClick={() => toggleAction(aKey)}
+                            style={{
+                              padding: '12px 0', display: 'grid',
+                              gridTemplateColumns: '110px 1fr auto', gap: 16, alignItems: 'flex-start',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: 'var(--ink-mute)', letterSpacing: '0.12em', textTransform: 'uppercase', paddingTop: 4 }}>{a.when}</div>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div style={{ fontFamily: 'Newsreader, serif', fontSize: 16, lineHeight: 1.25 }}>{a.action}</div>
+                                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-mute)', transition: 'transform 0.15s', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+                              </div>
+                              <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 3, maxWidth: 440 }}>{a.detail}</div>
+                              <div style={{ marginTop: 6, fontFamily: 'JetBrains Mono, monospace', fontSize: 10.5, color: 'var(--gain)' }}>{a.impact}</div>
+                            </div>
+                            <div style={{ paddingTop: 4 }} onClick={e => e.stopPropagation()}>
+                              {on ? (
+                                <span style={{
+                                  fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5,
+                                  padding: '4px 8px', border: '1px solid var(--gain)',
+                                  color: 'var(--gain)', letterSpacing: '0.12em', textTransform: 'uppercase',
+                                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                                }}>
+                                  <span style={{ width: 5, height: 5, borderRadius: 3, background: 'var(--gain)' }} /> Auto-run
+                                </span>
+                              ) : scheduled[a.action] ? (
+                                <span style={{
+                                  fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5,
+                                  padding: '4px 8px', border: '1px solid var(--gain)',
+                                  color: 'var(--gain)', letterSpacing: '0.12em', textTransform: 'uppercase',
+                                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                                }}>
+                                  ✓ Scheduled
+                                </span>
+                              ) : (
+                                <Button variant="ghost" onClick={() => setScheduleModal({ open: true, action: a.action })} style={{ padding: '5px 12px', fontSize: 11 }}>Schedule</Button>
+                              )}
+                            </div>
                           </div>
-                          <div style={{ paddingTop: 4 }}>
-                            {on ? (
-                              <span style={{
-                                fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5,
-                                padding: '4px 8px', border: '1px solid var(--gain)',
-                                color: 'var(--gain)', letterSpacing: '0.12em', textTransform: 'uppercase',
-                                display: 'inline-flex', alignItems: 'center', gap: 5,
-                              }}>
-                                <span style={{ width: 5, height: 5, borderRadius: 3, background: 'var(--gain)' }} /> Auto-run
-                              </span>
-                            ) : scheduled[a.action] ? (
-                              <span style={{
-                                fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5,
-                                padding: '4px 8px', border: '1px solid var(--gain)',
-                                color: 'var(--gain)', letterSpacing: '0.12em', textTransform: 'uppercase',
-                                display: 'inline-flex', alignItems: 'center', gap: 5,
-                              }}>
-                                ✓ Scheduled
-                              </span>
-                            ) : (
-                              <Button variant="ghost" onClick={() => setScheduleModal({ open: true, action: a.action })} style={{ padding: '5px 12px', fontSize: 11 }}>Schedule</Button>
-                            )}
-                          </div>
+
+                          {/* Expanded reasoning panel */}
+                          {open && (
+                            <div style={{
+                              marginBottom: 14, padding: '16px 20px',
+                              background: 'color-mix(in oklab, var(--ink) 4%, transparent)',
+                              borderLeft: '2px solid var(--ink)',
+                            }}>
+                              {a.why && (
+                                <div style={{ marginBottom: a.trigger ? 14 : 0 }}>
+                                  <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-mute)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 6 }}>Why it matters</div>
+                                  <div style={{ fontFamily: 'Newsreader, serif', fontStyle: 'italic', fontSize: 14, lineHeight: 1.6, color: 'var(--ink-soft)', maxWidth: 520 }}>{a.why}</div>
+                                </div>
+                              )}
+                              {a.trigger && (
+                                <div>
+                                  <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-mute)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 6 }}>What triggers it</div>
+                                  <div style={{ fontFamily: 'Newsreader, serif', fontStyle: 'italic', fontSize: 14, lineHeight: 1.6, color: 'var(--ink-soft)', maxWidth: 520 }}>{a.trigger}</div>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </section>
                 );

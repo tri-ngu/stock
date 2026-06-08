@@ -583,8 +583,16 @@ const ACTION_CATEGORIES = [
     label: 'Rebalancing',
     desc: 'Bring allocations back to target as they drift.',
     actions: [
-      { when: 'Within 30 days', action: 'Quarterly rebalance',  detail: 'Drift exceeds 4% threshold in US equity.',                       impact: '+0.18% expected return' },
-      { when: 'On milestone',   action: 'Glide-path step',      detail: 'Term horizon shortens — shift 5% from equities to bonds.',       impact: '↓ Volatility 1.4%' },
+      {
+        when: 'Within 30 days', action: 'Quarterly rebalance', detail: 'Drift exceeds 4% threshold in US equity.', impact: '+0.18% expected return',
+        why: 'Drift above 4% is the crossover point where the expected-return drag from misallocation exceeds the transaction cost of rebalancing. Acting now captures the efficiency gain before drift widens further and compounds the gap.',
+        trigger: 'US equity weight has drifted beyond the 4% threshold above target, detected during monthly drift monitoring against the model portfolio.',
+      },
+      {
+        when: 'On milestone', action: 'Glide-path step', detail: 'Term horizon shortens — shift 5% from equities to bonds.', impact: '↓ Volatility 1.4%',
+        why: 'As your time horizon compresses, equity volatility becomes a larger threat to your goal than opportunity cost. Shifting capital to bonds now locks in a more conservative allocation before the higher-drawdown window opens.',
+        trigger: 'Remaining investment term has crossed below the glide-path step threshold in your risk profile, signaling the transition from growth-phase to preservation-phase allocation.',
+      },
     ],
   },
   {
@@ -593,8 +601,16 @@ const ACTION_CATEGORIES = [
     label: 'Tax optimization',
     desc: 'Reduce drag from taxes through systematic harvesting.',
     actions: [
-      { when: 'Q3 2026',  action: 'Tax-loss harvest',     detail: 'Realize losses in VWO to offset year-to-date gains.',                 impact: 'Est. $312 tax savings' },
-      { when: 'Year-end', action: 'Lot-level selection',  detail: 'Prefer high-cost-basis lots when raising cash.',                      impact: 'Est. $185 deferred' },
+      {
+        when: 'Q3 2026', action: 'Tax-loss harvest', detail: 'Realize losses in VWO to offset year-to-date gains.', impact: 'Est. $312 tax savings',
+        why: 'Harvesting losses in VWO converts unrealized losses into a usable tax asset — offsetting realized gains elsewhere and reducing the tax owed this year. A replacement ETF can maintain sector continuity during the wash-sale window, preserving exposure without sacrificing the benefit.',
+        trigger: "VWO shows year-to-date unrealized losses sufficient to generate the estimated savings, and the 30-day wash-sale window is clear for Q3 realization.",
+      },
+      {
+        when: 'Year-end', action: 'Lot-level selection', detail: 'Prefer high-cost-basis lots when raising cash.', impact: 'Est. $185 deferred',
+        why: 'When selling, choosing high-cost-basis lots minimizes the taxable gain per dollar raised. This defers the capital gains liability and keeps more of the portfolio compounding — a free efficiency gain that requires no change to position or strategy.',
+        trigger: 'A cash-raising event (redemption, rebalance, or withdrawal) is detected. The system identifies the optimal lot sequence before execution to maximize cost-basis efficiency.',
+      },
     ],
   },
   {
@@ -603,8 +619,16 @@ const ACTION_CATEGORIES = [
     label: 'Income & cash sweep',
     desc: 'Put idle cash and distributions to work.',
     actions: [
-      { when: 'Weekly',      action: 'Dividend reinvestment', detail: 'Auto-reinvest VTI, VNQ, BND distributions.',                       impact: '+$22 / quarter' },
-      { when: 'On deposit',  action: 'Cash sweep to SHV',     detail: 'Move balances over $500 into short Treasuries.',                   impact: '+4.8% APY on idle' },
+      {
+        when: 'Weekly', action: 'Dividend reinvestment', detail: 'Auto-reinvest VTI, VNQ, BND distributions.', impact: '+$22 / quarter',
+        why: 'Reinvesting distributions eliminates cash drag and preserves the full compounding effect of dividends — which historically account for a large share of total equity returns over long horizons. Letting distributions sit as cash breaks that compounding chain.',
+        trigger: 'A dividend or distribution is received from VTI, VNQ, or BND. Reinvestment executes at market open the following trading day into the same position.',
+      },
+      {
+        when: 'On deposit', action: 'Cash sweep to SHV', detail: 'Move balances over $500 into short Treasuries.', impact: '+4.8% APY on idle',
+        why: 'Idle cash earns nothing and creates return drag. SHV (iShares Short Treasury Bond) provides near-money-market yield with minimal interest-rate risk — extracting return from balances that would otherwise sit uninvested between deployments.',
+        trigger: 'Portfolio cash balance exceeds $500 following a deposit, dividend receipt, or partial sale, triggering an automatic sweep into SHV at next available execution.',
+      },
     ],
   },
   {
@@ -613,8 +637,16 @@ const ACTION_CATEGORIES = [
     label: 'Risk management',
     desc: 'Monitor exposures and intervene during stress.',
     actions: [
-      { when: 'Monthly',     action: 'Concentration check',   detail: 'Trim any position exceeding 12% of portfolio weight.',             impact: 'Caps idiosyncratic risk' },
-      { when: 'On drawdown', action: 'Volatility hedge',      detail: 'Buy 2% protective puts on the index if VIX exceeds 28.',           impact: '↓ Max drawdown ~3%' },
+      {
+        when: 'Monthly', action: 'Concentration check', detail: 'Trim any position exceeding 12% of portfolio weight.', impact: 'Caps idiosyncratic risk',
+        why: "A single position above 12% of portfolio weight introduces idiosyncratic risk — risk tied to one company's specific events — beyond what diversification can offset. Trimming enforces the discipline of not letting winners crowd out the rest of the portfolio and erode diversification over time.",
+        trigger: 'Monthly position sizing review detects any holding crossing the 12% threshold, either from price appreciation or underweight growth elsewhere in the portfolio.',
+      },
+      {
+        when: 'On drawdown', action: 'Volatility hedge', detail: 'Buy 2% protective puts on the index if VIX exceeds 28.', impact: '↓ Max drawdown ~3%',
+        why: 'When the VIX signals sustained market-wide fear, protective puts provide asymmetric downside insurance. The premium cost is bounded at 2%, while the protection activates precisely when drawdown risk is highest — making it a cost-efficient hedge rather than a standing drag.',
+        trigger: 'VIX closes above 28 on two consecutive sessions, indicating sustained elevated volatility rather than a brief spike. Index puts are purchased with a 30-day expiry.',
+      },
     ],
   },
 ];
