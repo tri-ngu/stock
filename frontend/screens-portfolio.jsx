@@ -187,7 +187,7 @@ function HoldingCard({ position: p, expanded, onToggle }) {
           <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: sectorDot }} />
           <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em' }}>{p.ticker}</div>
           <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: signalColor }}>{(p.weight * 100).toFixed(1)}%</div>
-          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 8.5, color: signalColor, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{signalLabel}</div>
+          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 7.5, color: 'var(--ink-mute)', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 1 }}>weight</div>
         </div>
         {/* Main — headline + tags */}
         <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 6 }}>
@@ -482,6 +482,11 @@ function Dashboard({ copy, profile, portfolio, density, mode = 'initial', pendin
               <Eyebrow>Holdings · {portfolio.positions.length}</Eyebrow>
             </div>
             <div style={{ borderTop: '1px solid var(--ink)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '10px 72px 1fr auto auto', gap: 10, padding: '5px 0', alignItems: 'center', borderBottom: '1px solid var(--rule)' }}>
+                <div /><div /><div />
+                <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 8, color: 'var(--ink-mute)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Signal</div>
+                <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 8, color: 'var(--ink-mute)', textTransform: 'uppercase', letterSpacing: '0.12em', textAlign: 'right' }}>Weight</div>
+              </div>
               {portfolio.positions.map((p, i) => {
                 const signalColor = { overweight: 'var(--gain)', reduce: 'var(--loss)', hold: 'var(--ink-mute)' }[p.signal] || 'var(--ink-mute)';
                 const sectorDot = SECTOR_COLORS[p.sector] || 'var(--ink-mute)';

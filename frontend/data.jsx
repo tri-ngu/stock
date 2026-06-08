@@ -172,7 +172,7 @@ async function buildPortfolioWithRealData(budget, risk, term, tickers, aiPortfol
     }
 
     const projLow  = budget * Math.pow(1 + (expReturn - vol) / 100, yrs);
-    const projMid  = budget * Math.pow(1 + expReturn / 100, yrs);
+    const projMid  = projectedSeries.length ? projectedSeries[projectedSeries.length - 1].value : budget * Math.pow(1 + expReturn / 100, yrs);
     const projHigh = budget * Math.pow(1 + (expReturn + vol / 2) / 100, yrs);
 
     return {
@@ -421,7 +421,6 @@ function buildPortfolio(budget, risk, term) {
   // Projected value at term
   const yrs = term || 10;
   const projLow  = budget * Math.pow(1 + (expReturn / 100) - vol / 100, yrs);
-  const projMid  = budget * Math.pow(1 + expReturn / 100, yrs);
   const projHigh = budget * Math.pow(1 + (expReturn / 100) + vol / 200, yrs);
 
   // Synthetic backtest sparkline (60 months = 5 years)
@@ -477,6 +476,8 @@ function buildPortfolio(budget, risk, term) {
     const ps = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     projectedSeries.push({ time: ps, value: +pv.toFixed(2) });
   }
+
+  const projMid = projectedSeries.length ? projectedSeries[projectedSeries.length - 1].value : budget * Math.pow(1 + expReturn / 100, yrs);
 
   return {
     budget, risk, term: yrs,
